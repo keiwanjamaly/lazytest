@@ -10,6 +10,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
+from textual.widgets.tree import TreeNode
 
 from lazytest.cmake_build import build_target
 from lazytest.config import AppConfig, load_config
@@ -95,6 +96,8 @@ class LazytestApp(App[None]):
         self.visible_tests: list[DiscoveredTest] = []
         self.output_buffers: dict[str, list[str]] = {"session": []}
         self.active_output_key = "session"
+        self.test_nodes: dict[str, TreeNode[TestNodeData]] = {}
+        self.group_nodes: dict[str, TreeNode[TestNodeData]] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -146,6 +149,8 @@ class LazytestApp(App[None]):
         self.visible_tests = filter_tests(self.session.tests, query)
         tree = self.query_one("#tests", Tree)
         tree.clear()
+        self.test_nodes.clear()
+        self.group_nodes.clear()
         if not self.visible_tests:
             tree.root.add_leaf("No matches")
         else:
@@ -157,6 +162,7 @@ class LazytestApp(App[None]):
                     data=TestNodeData(executable, output_key=self.executable_output_key(executable)),
                     expand=True,
                 )
+                self.group_nodes[executable] = group_node
                 for test in tests:
                     node = group_node.add_leaf(
                         self.format_test(test),
@@ -166,6 +172,7 @@ class LazytestApp(App[None]):
                             self.test_output_key(test.name),
                         ),
                     )
+                    self.test_nodes[test.name] = node
                     if fallback_node is None:
                         fallback_node = node
                     if test.name == selected_name:
@@ -304,13 +311,13 @@ class LazytestApp(App[None]):
 
             for test in target_tests:
                 self.session.set_status(test.name, TestStatus.RUNNING)
-            await self.refresh_test_status(target_tests[0].name)
+            await self.refresh_test_statuses([test.name for test in target_tests])
             await append_build_output(f"$ cmake --build target {target} ({reason})\n")
             build_result = await build_target(self.config, target, append_build_output)
             if not build_result.ok:
                 for test in target_tests:
                     self.session.set_status(test.name, TestStatus.FAILED)
-                await self.refresh_test_status(target_tests[0].name)
+                await self.refresh_test_statuses([test.name for test in target_tests])
                 continue
 
             for test in target_tests:
@@ -342,7 +349,28 @@ class LazytestApp(App[None]):
         return tests
 
     async def refresh_test_status(self, name: str) -> None:
-        await self.apply_filter(self.query_one("#search", Input).value, name)
+        await self.refresh_test_statuses([name])
+
+    async def refresh_test_statuses(self, names: list[str]) -> None:
+        updated_groups: set[str] = set()
+        for name in names:
+            test = self.session.tests_by_name.get(name)
+            node = self.test_nodes.get(name)
+            if test is None or node is None:
+                continue
+            node.set_label(self.format_test(test))
+            updated_groups.add(self.executable_label(test))
+
+        for executable in updated_groups:
+            node = self.group_nodes.get(executable)
+            if node is None:
+                continue
+            tests = [
+                self.session.tests_by_name[test.name]
+                for test in self.visible_tests
+                if self.executable_label(test) == executable
+            ]
+            node.set_label(self.format_executable_group(executable, tests))
 
     def clear_output(self, key: str) -> None:
         self.output_buffers[key] = []

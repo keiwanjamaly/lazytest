@@ -1,5 +1,6 @@
 from rich.text import Text
 import pytest
+from textual.widgets import Tree
 
 from lazytest.app import LazytestApp
 from lazytest.config import AppConfig
@@ -58,8 +59,8 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
     events: list[str] = []
     output: dict[str, list[str]] = {}
 
-    async def fake_refresh_test_status(name: str) -> None:
-        refreshed_statuses.append(app.session.tests_by_name[name].status)
+    async def fake_refresh_test_statuses(names: list[str]) -> None:
+        refreshed_statuses.extend(app.session.tests_by_name[name].status for name in names)
 
     async def fake_build_target(config, target, on_output):
         events.append(f"build:{target}")
@@ -73,7 +74,7 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
     async def fake_append_output(text: str, *, key: str = "session") -> None:
         output.setdefault(key, []).append(text)
 
-    monkeypatch.setattr(app, "refresh_test_status", fake_refresh_test_status)
+    monkeypatch.setattr(app, "refresh_test_statuses", fake_refresh_test_statuses)
     monkeypatch.setattr(app, "show_output", lambda key: None)
     monkeypatch.setattr(app, "append_output", fake_append_output)
     monkeypatch.setattr("lazytest.app.build_target", fake_build_target)
@@ -86,7 +87,12 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
         "test:unit.math.addition",
         "test:unit.math.subtraction",
     ]
-    assert refreshed_statuses == [Status.RUNNING, Status.PASSED, Status.PASSED]
+    assert refreshed_statuses == [
+        Status.RUNNING,
+        Status.RUNNING,
+        Status.PASSED,
+        Status.PASSED,
+    ]
     assert "".join(output["session"]) == "$ cmake --build target unit_tests (using configured default_build_target)\n"
     assert "".join(output["test:unit.math.addition"]) == (
         "$ ctest unit.math.addition\n"
@@ -96,3 +102,40 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
         "$ ctest unit.math.subtraction\n"
         "output from unit.math.subtraction\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_refresh_test_status_updates_tree_labels_without_rebuilding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition", command=("/tmp/build/unit_tests",)),
+            DiscoveredTest("unit.math.subtraction", command=("/tmp/build/unit_tests",)),
+        ]
+    )
+
+    async with app.run_test():
+        await app.apply_filter("", None)
+        tree = app.query_one("#tests", Tree)
+        clear_calls = 0
+        original_clear = tree.clear
+
+        def track_clear() -> None:
+            nonlocal clear_calls
+            clear_calls += 1
+            original_clear()
+
+        monkeypatch.setattr(tree, "clear", track_clear)
+
+        app.session.set_status("unit.math.addition", Status.RUNNING)
+        await app.refresh_test_status("unit.math.addition")
+
+        assert clear_calls == 0
+        assert app.test_nodes["unit.math.addition"].label.plain == "⟳ unit.math.addition"
+        assert app.group_nodes["unit_tests"].label.plain == "⟳ unit_tests (2)"
