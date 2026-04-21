@@ -1,5 +1,8 @@
-def main():
-    print("Hello from lazytest!")
+from lazytest.app import run
+
+
+def main() -> None:
+    run()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+[lazytest]
+build_dir = "build"
+default_build_target = "all"
+extra_ctest_args = []
+extra_build_args = []
+
+[[lazytest.target_mappings]]
+pattern = "^unit\\."
+target = "unit_tests"
+
+[[lazytest.target_mappings]]
+pattern = "^integration\\."
+target = "integration_tests"
