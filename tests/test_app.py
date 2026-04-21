@@ -62,8 +62,8 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
     async def fake_refresh_test_statuses(names: list[str]) -> None:
         refreshed_statuses.extend(app.session.tests_by_name[name].status for name in names)
 
-    async def fake_build_target(config, target, on_output):
-        events.append(f"build:{target}")
+    async def fake_build_targets(config, targets, on_output):
+        events.append(f"build:{','.join(targets)}")
         return ProcessResult(command=("cmake",), returncode=0)
 
     async def fake_run_test(config, test, on_output):
@@ -77,7 +77,7 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
     monkeypatch.setattr(app, "refresh_test_statuses", fake_refresh_test_statuses)
     monkeypatch.setattr(app, "show_output", lambda key: None)
     monkeypatch.setattr(app, "append_output", fake_append_output)
-    monkeypatch.setattr("lazytest.app.build_target", fake_build_target)
+    monkeypatch.setattr("lazytest.app.build_targets", fake_build_targets)
     monkeypatch.setattr("lazytest.app.run_test", fake_run_test)
 
     await app._run_tests_by_name(["unit.math.addition", "unit.math.subtraction"])
@@ -102,6 +102,70 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
         "$ ctest unit.math.subtraction\n"
         "output from unit.math.subtraction\n"
     )
+
+
+def test_run_all_uses_visible_filtered_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition"),
+            DiscoveredTest("unit.db.insert"),
+        ]
+    )
+    app.visible_tests = [app.session.tests_by_name["unit.db.insert"]]
+    requested_names: list[str] = []
+
+    monkeypatch.setattr(app, "run_tests_by_name", requested_names.extend)
+
+    app.action_run_all()
+
+    assert requested_names == ["unit.db.insert"]
+
+
+@pytest.mark.asyncio
+async def test_run_tests_by_name_builds_all_required_targets_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition", command=("/tmp/build/unit_tests",)),
+            DiscoveredTest("integration.api.health", command=("/tmp/build/integration_tests",)),
+        ]
+    )
+    events: list[str] = []
+
+    async def fake_refresh_test_statuses(names: list[str]) -> None:
+        return None
+
+    async def fake_build_targets(config, targets, on_output):
+        events.append(f"build:{','.join(targets)}")
+        return ProcessResult(command=("cmake",), returncode=0)
+
+    async def fake_run_test(config, test, on_output):
+        events.append(f"test:{test.name}")
+        return ProcessResult(command=("ctest",), returncode=0)
+
+    async def fake_refresh_test_status(name: str) -> None:
+        return None
+
+    async def fake_append_output(text: str, *, key: str = "session") -> None:
+        return None
+
+    monkeypatch.setattr(app, "refresh_test_statuses", fake_refresh_test_statuses)
+    monkeypatch.setattr(app, "refresh_test_status", fake_refresh_test_status)
+    monkeypatch.setattr(app, "show_output", lambda key: None)
+    monkeypatch.setattr(app, "append_output", fake_append_output)
+    monkeypatch.setattr("lazytest.app.build_targets", fake_build_targets)
+    monkeypatch.setattr("lazytest.app.run_test", fake_run_test)
+
+    await app._run_tests_by_name(["unit.math.addition", "integration.api.health"])
+
+    assert events == [
+        "build:unit_tests,integration_tests",
+        "test:unit.math.addition",
+        "test:integration.api.health",
+    ]
 
 
 @pytest.mark.asyncio

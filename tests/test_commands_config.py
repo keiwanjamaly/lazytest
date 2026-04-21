@@ -33,6 +33,23 @@ def test_build_command_supports_build_preset(monkeypatch: pytest.MonkeyPatch) ->
     assert command[:5] == ["cmake", "--build", "--preset", "debug", "--target"]
 
 
+def test_build_command_supports_multiple_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("lazytest.cmake_build.os.cpu_count", lambda: 2)
+
+    command = build_command(AppConfig(build_dir=Path("/tmp/build")), ["unit", "integration"])
+
+    assert command == [
+        "cmake",
+        "--build",
+        "/tmp/build",
+        "--target",
+        "unit",
+        "integration",
+        "--parallel",
+        "2",
+    ]
+
+
 def test_ctest_command_prefers_tests_from_file() -> None:
     command = ctest_command_for_names(
         AppConfig(build_dir=Path("/tmp/build")),

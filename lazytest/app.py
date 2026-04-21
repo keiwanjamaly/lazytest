@@ -12,7 +12,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
 from textual.widgets.tree import TreeNode
 
-from lazytest.cmake_build import build_target
+from lazytest.cmake_build import build_targets
 from lazytest.config import AppConfig, load_config
 from lazytest.ctest_discovery import discovery_command, parse_ctest_json
 from lazytest.models import DiscoveredTest, TestStatus
@@ -84,7 +84,7 @@ class LazytestApp(App[None]):
         Binding("/", "focus_search", "Search"),
         Binding("ctrl+u", "clear_search", "Clear search"),
         Binding("f", "run_failed", "Run failed"),
-        Binding("a", "run_all", "Run all"),
+        Binding("a", "run_all", "Run filtered"),
         Binding("ctrl+l", "clear_output", "Clear output"),
         Binding("r", "refresh", "Refresh"),
     ]
@@ -262,7 +262,7 @@ class LazytestApp(App[None]):
         self.run_tests_by_name([test.name for test in self.session.failed_tests()])
 
     def action_run_all(self) -> None:
-        self.run_tests_by_name([test.name for test in self.session.tests])
+        self.run_tests_by_name([test.name for test in self.visible_tests])
 
     @work(exclusive=True)
     async def run_tests_by_name(self, names: list[str]) -> None:
@@ -292,34 +292,48 @@ class LazytestApp(App[None]):
             )
             target_tests.append(test)
 
-        for target, (reason, target_tests) in tests_by_target.items():
-            group_keys = list(
-                dict.fromkeys(
-                    self.executable_output_key(self.executable_label(test))
-                    for test in target_tests
-                )
+        if not tests_by_target:
+            return
+
+        targets = list(tests_by_target)
+        all_target_tests = [
+            test
+            for _, target_tests in tests_by_target.values()
+            for test in target_tests
+        ]
+        group_keys = list(
+            dict.fromkeys(
+                self.executable_output_key(self.executable_label(test))
+                for test in all_target_tests
             )
+        )
+        for group_key in group_keys:
+            self.clear_output(group_key)
+        if group_keys:
+            self.show_output(group_keys[0])
+
+        async def append_build_output(text: str) -> None:
+            await self.append_output(text)
             for group_key in group_keys:
-                self.clear_output(group_key)
-            if group_keys:
-                self.show_output(group_keys[0])
+                await self.append_output(text, key=group_key)
 
-            async def append_build_output(text: str) -> None:
-                await self.append_output(text)
-                for group_key in group_keys:
-                    await self.append_output(text, key=group_key)
+        for test in all_target_tests:
+            self.session.set_status(test.name, TestStatus.RUNNING)
+        await self.refresh_test_statuses([test.name for test in all_target_tests])
 
-            for test in target_tests:
-                self.session.set_status(test.name, TestStatus.RUNNING)
-            await self.refresh_test_statuses([test.name for test in target_tests])
-            await append_build_output(f"$ cmake --build target {target} ({reason})\n")
-            build_result = await build_target(self.config, target, append_build_output)
-            if not build_result.ok:
-                for test in target_tests:
-                    self.session.set_status(test.name, TestStatus.FAILED)
-                await self.refresh_test_statuses([test.name for test in target_tests])
-                continue
+        if len(targets) == 1:
+            reason = tests_by_target[targets[0]][0]
+            await append_build_output(f"$ cmake --build target {targets[0]} ({reason})\n")
+        else:
+            await append_build_output(f"$ cmake --build targets {', '.join(targets)}\n")
+        build_result = await build_targets(self.config, targets, append_build_output)
+        if not build_result.ok:
+            for test in all_target_tests:
+                self.session.set_status(test.name, TestStatus.FAILED)
+            await self.refresh_test_statuses([test.name for test in all_target_tests])
+            return
 
+        for _, target_tests in tests_by_target.values():
             for test in target_tests:
                 test_key = self.test_output_key(test.name)
                 self.show_output(test_key)

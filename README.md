@@ -106,12 +106,12 @@ Keybindings:
 - `Ctrl+U`: clear search
 - `Enter`: build and run selected test, or all tests in the selected executable group
 - `f`: rerun failed tests
-- `a`: run all tests
+- `a`: run filtered tests
 - `Ctrl+L`: clear output
 - `r`: rediscover tests
 - `Ctrl+Q`: quit
 
-When several selected tests map to the same CMake target, `lazytest` builds that target once and then runs each CTest test in a separate subprocess with its own output heading.
+When several selected tests map to CMake targets, `lazytest` builds all required targets in one CMake invocation and then runs each CTest test in a separate subprocess with its own output heading.
 
 ## Test
 
