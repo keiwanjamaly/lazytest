@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 
+from rich.markup import escape
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -18,11 +20,17 @@ from lazytest.search import filter_tests, preserve_selection
 from lazytest.session import TestSession
 
 
-STATUS_MARKERS = {
-    TestStatus.UNKNOWN: "?",
-    TestStatus.RUNNING: "*",
-    TestStatus.PASSED: "+",
-    TestStatus.FAILED: "!",
+@dataclass(frozen=True)
+class StatusDisplay:
+    marker: str
+    style: str
+
+
+STATUS_DISPLAYS = {
+    TestStatus.UNKNOWN: StatusDisplay("○", "dim"),
+    TestStatus.RUNNING: StatusDisplay("⟳", "yellow"),
+    TestStatus.PASSED: StatusDisplay("✓", "green"),
+    TestStatus.FAILED: StatusDisplay("✗", "red"),
 }
 
 
@@ -136,8 +144,10 @@ class LazytestApp(App[None]):
         summary.update(f"{len(self.visible_tests)} visible / {len(self.session.tests)} total")
 
     def format_test(self, test: DiscoveredTest) -> str:
-        labels = f" [{', '.join(test.labels)}]" if test.labels else ""
-        return f"{STATUS_MARKERS[test.status]} {test.name}{labels}"
+        display = STATUS_DISPLAYS[test.status]
+        label_text = f"[{', '.join(test.labels)}]" if test.labels else ""
+        labels = f" {escape(label_text)}" if label_text else ""
+        return f"[{display.style}]{display.marker} {escape(test.name)}{labels}[/]"
 
     def selected_test_name(self) -> str | None:
         list_view = self.query_one("#tests", ListView)
@@ -170,6 +180,9 @@ class LazytestApp(App[None]):
 
     @work(exclusive=True)
     async def run_tests_by_name(self, names: list[str]) -> None:
+        await self._run_tests_by_name(names)
+
+    async def _run_tests_by_name(self, names: list[str]) -> None:
         if not names:
             self.query_one("#output", RichLog).write("No tests selected.")
             return
@@ -177,9 +190,14 @@ class LazytestApp(App[None]):
             test = self.session.tests_by_name.get(name)
             if test is None:
                 continue
+            self.session.set_status(name, TestStatus.RUNNING)
+            await self.refresh_test_status(name)
             await build_and_run_test(self.config, self.session, test, self.append_output)
-            await self.apply_filter(self.query_one("#search", Input).value, name)
+            await self.refresh_test_status(name)
             await asyncio.sleep(0)
+
+    async def refresh_test_status(self, name: str) -> None:
+        await self.apply_filter(self.query_one("#search", Input).value, name)
 
     async def append_output(self, text: str) -> None:
         self.query_one("#output", RichLog).write(text.rstrip("\n"))
