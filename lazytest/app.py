@@ -104,11 +104,6 @@ class LazytestApp(App[None]):
         event.stop()
         self.action_run_selected()
 
-    @on(ListView.Selected, "#tests")
-    def on_test_selected(self, event: ListView.Selected) -> None:
-        event.stop()
-        self.action_run_selected()
-
     async def discover(self) -> None:
         output = self.query_one("#output", RichLog)
         output.write(f"$ {' '.join(discovery_command(self.config))}")
