@@ -67,6 +67,50 @@ time.sleep(60)
 
 
 @pytest.mark.asyncio
+async def test_process_streams_partial_output_before_exit() -> None:
+    output: list[str] = []
+    code = """
+import sys
+import time
+
+sys.stdout.write("step 1")
+sys.stdout.flush()
+time.sleep(0.2)
+sys.stdout.write("\\n")
+sys.stdout.flush()
+"""
+
+    task = asyncio.create_task(
+        run_streaming([sys.executable, "-c", code], on_output=output.append)
+    )
+    for _ in range(100):
+        if output:
+            break
+        await asyncio.sleep(0.01)
+
+    assert output == ["step 1"]
+    result = await task
+    assert result.ok
+    assert "".join(output) == "step 1\n"
+
+
+@pytest.mark.asyncio
+async def test_process_reports_pid_on_start() -> None:
+    pids: list[int] = []
+    output: list[str] = []
+    code = "import os; print(os.getpid())"
+
+    result = await run_streaming(
+        [sys.executable, "-c", code],
+        on_output=output.append,
+        on_start=pids.append,
+    )
+
+    assert result.ok
+    assert pids == [int("".join(output).strip())]
+
+
+@pytest.mark.asyncio
 async def test_integration_style_core_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     test = DiscoveredTest(name="unit.math")
     session = Session.from_tests([test])

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -351,7 +352,12 @@ class LazytestApp(App[None]):
         else:
             await append_build_output(f"$ cmake --build targets {', '.join(targets)}\n")
         try:
-            build_result = await build_targets(self.config, targets, append_build_output)
+            build_result = await build_targets(
+                self.config,
+                targets,
+                append_build_output,
+                on_start=lambda pid: append_build_output(f"process id: {pid}\n"),
+            )
             if not build_result.ok:
                 for test in all_target_tests:
                     self.session.set_status(test.name, TestStatus.FAILED)
@@ -362,11 +368,15 @@ class LazytestApp(App[None]):
                 for test in target_tests:
                     test_key = self.test_output_key(test.name)
                     self.show_output(test_key)
-                    await self.append_output(f"$ ctest {test.name}\n", key=test_key)
+                    await self.append_output(f"$ {self.test_run_label(test)}\n", key=test_key)
                     test_result = await run_test(
                         self.config,
                         test,
                         lambda text, key=test_key: self.append_output(text, key=key),
+                        on_start=lambda pid, key=test_key: self.append_process_id(
+                            pid,
+                            key=key,
+                        ),
                     )
                     self.session.set_status(
                         test.name,
@@ -397,6 +407,14 @@ class LazytestApp(App[None]):
             if test is not None:
                 tests.append(test)
         return tests
+
+    def test_run_label(self, test: DiscoveredTest) -> str:
+        if test.command:
+            return shlex.join(test.command)
+        return f"ctest {test.name}"
+
+    async def append_process_id(self, pid: int, *, key: str = "session") -> None:
+        await self.append_output(f"process id: {pid}\n", key=key)
 
     async def refresh_test_status(self, name: str) -> None:
         await self.refresh_test_statuses([name])

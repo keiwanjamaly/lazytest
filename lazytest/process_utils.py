@@ -10,6 +10,7 @@ from pathlib import Path
 from lazytest.models import ProcessResult
 
 OutputCallback = Callable[[str], Awaitable[None] | None]
+ProcessStartCallback = Callable[[int], Awaitable[None] | None]
 
 
 async def run_streaming(
@@ -17,6 +18,7 @@ async def run_streaming(
     *,
     cwd: Path | None = None,
     on_output: OutputCallback | None = None,
+    on_start: ProcessStartCallback | None = None,
 ) -> ProcessResult:
     process: asyncio.subprocess.Process | None = None
     try:
@@ -36,10 +38,13 @@ async def run_streaming(
             await _maybe_await(on_output(f"Failed to start {' '.join(command)}: {exc}\n"))
         return ProcessResult(command=tuple(command), returncode=126)
 
+    if on_start:
+        await _maybe_await(on_start(process.pid))
+
     try:
         assert process.stdout is not None
         while True:
-            chunk = await process.stdout.readline()
+            chunk = await process.stdout.read(4096)
             if not chunk:
                 break
             if on_output:

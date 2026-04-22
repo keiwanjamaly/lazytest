@@ -6,7 +6,7 @@ from lazytest.cmake_build import build_command
 from lazytest.config import AppConfig, load_config, parse_config
 from lazytest.ctest_discovery import discovery_command
 from lazytest.models import DiscoveredTest, ProcessResult
-from lazytest.test_runner import ctest_command_for_names, run_tests
+from lazytest.test_runner import ctest_command_for_names, run_test, run_tests
 
 
 def test_build_command_uses_cmake_build_and_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,7 +142,7 @@ async def test_run_tests_falls_back_when_tests_from_file_is_unavailable(
     async def fake_support() -> bool:
         return False
 
-    async def fake_run_streaming(command, *, cwd, on_output):
+    async def fake_run_streaming(command, *, cwd, on_output, on_start=None):
         commands.append(command)
         return ProcessResult(command=tuple(command), returncode=0)
 
@@ -161,3 +161,33 @@ async def test_run_tests_falls_back_when_tests_from_file_is_unavailable(
         ["ctest", "--test-dir", "/tmp/build", "-R", "^unit\\.math$", "--output-on-failure"]
     ]
     assert "anchored regex fallback" in "".join(output)
+
+
+@pytest.mark.asyncio
+async def test_run_test_uses_discovered_command_for_live_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[list[str], Path | None]] = []
+
+    async def fake_run_streaming(command, *, cwd, on_output, on_start=None):
+        calls.append((command, cwd))
+        on_output("live output\n")
+        return ProcessResult(command=tuple(command), returncode=0)
+
+    monkeypatch.setattr("lazytest.test_runner.run_streaming", fake_run_streaming)
+    output: list[str] = []
+
+    result = await run_test(
+        AppConfig(build_dir=Path("/tmp/build")),
+        DiscoveredTest(
+            name="simulation",
+            command=("/tmp/build/sim", "--case", "simulation"),
+            working_directory=tmp_path,
+        ),
+        output.append,
+    )
+
+    assert result.ok
+    assert calls == [(["/tmp/build/sim", "--case", "simulation"], tmp_path)]
+    assert output == ["live output\n"]

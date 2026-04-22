@@ -8,7 +8,7 @@ from pathlib import Path
 
 from lazytest.config import AppConfig
 from lazytest.models import DiscoveredTest, ProcessResult
-from lazytest.process_utils import collect_command, run_streaming
+from lazytest.process_utils import ProcessStartCallback, collect_command, run_streaming
 
 OutputCallback = Callable[[str], Awaitable[None] | None]
 _SUPPORTS_TESTS_FROM_FILE: bool | None = None
@@ -43,14 +43,23 @@ async def run_test(
     config: AppConfig,
     test: DiscoveredTest,
     on_output: OutputCallback,
+    on_start: ProcessStartCallback | None = None,
 ) -> ProcessResult:
-    return await run_tests(config, [test], on_output)
+    if test.command:
+        return await run_streaming(
+            list(test.command),
+            cwd=test.working_directory,
+            on_output=on_output,
+            on_start=on_start,
+        )
+    return await run_tests(config, [test], on_output, on_start)
 
 
 async def run_tests(
     config: AppConfig,
     tests: list[DiscoveredTest],
     on_output: OutputCallback,
+    on_start: ProcessStartCallback | None = None,
 ) -> ProcessResult:
     names = [test.name for test in tests]
     if not await ctest_supports_tests_from_file():
@@ -62,6 +71,7 @@ async def run_tests(
             ctest_command_for_names(config, names),
             cwd=None,
             on_output=on_output,
+            on_start=on_start,
         )
 
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as stream:
@@ -73,6 +83,7 @@ async def run_tests(
             ctest_command_for_names(config, names, tests_from_file=path),
             cwd=None,
             on_output=on_output,
+            on_start=on_start,
         )
     finally:
         try:

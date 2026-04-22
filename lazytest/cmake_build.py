@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 from lazytest.config import AppConfig
 from lazytest.models import ProcessResult
-from lazytest.process_utils import run_streaming
+from lazytest.process_utils import ProcessStartCallback, run_streaming
 
 OutputCallback = Callable[[str], Awaitable[None] | None]
 
@@ -27,12 +27,23 @@ def build_command(config: AppConfig, targets: str | Sequence[str]) -> list[str]:
 
 
 async def build_targets(
-    config: AppConfig, targets: Sequence[str], on_output: OutputCallback
+    config: AppConfig,
+    targets: Sequence[str],
+    on_output: OutputCallback,
+    on_start: ProcessStartCallback | None = None,
 ) -> ProcessResult:
-    return await run_streaming(build_command(config, targets), cwd=None, on_output=on_output)
+    return await run_streaming(
+        build_command(config, targets),
+        cwd=None,
+        on_output=on_output,
+        on_start=on_start,
+    )
 
 
 async def build_target(
-    config: AppConfig, target: str, on_output: OutputCallback
+    config: AppConfig,
+    target: str,
+    on_output: OutputCallback,
+    on_start: ProcessStartCallback | None = None,
 ) -> ProcessResult:
-    return await build_targets(config, [target], on_output)
+    return await build_targets(config, [target], on_output, on_start)

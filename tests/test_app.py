@@ -71,12 +71,16 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
     async def fake_refresh_test_statuses(names: list[str]) -> None:
         refreshed_statuses.extend(app.session.tests_by_name[name].status for name in names)
 
-    async def fake_build_targets(config, targets, on_output):
+    async def fake_build_targets(config, targets, on_output, on_start=None):
         events.append(f"build:{','.join(targets)}")
+        if on_start is not None:
+            await on_start(1234)
         return ProcessResult(command=("cmake",), returncode=0)
 
-    async def fake_run_test(config, test, on_output):
+    async def fake_run_test(config, test, on_output, on_start=None):
         events.append(f"test:{test.name}")
+        if on_start is not None:
+            await on_start(2000 + len(events))
         await on_output(f"output from {test.name}\n")
         return ProcessResult(command=("ctest",), returncode=0)
 
@@ -102,13 +106,18 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
         Status.PASSED,
         Status.PASSED,
     ]
-    assert "".join(output["session"]) == "$ cmake --build target unit_tests (using configured default_build_target)\n"
+    assert "".join(output["session"]) == (
+        "$ cmake --build target unit_tests (using configured default_build_target)\n"
+        "process id: 1234\n"
+    )
     assert "".join(output["test:unit.math.addition"]) == (
         "$ ctest unit.math.addition\n"
+        "process id: 2002\n"
         "output from unit.math.addition\n"
     )
     assert "".join(output["test:unit.math.subtraction"]) == (
         "$ ctest unit.math.subtraction\n"
+        "process id: 2003\n"
         "output from unit.math.subtraction\n"
     )
 
@@ -188,11 +197,11 @@ async def test_run_tests_by_name_builds_all_required_targets_at_once(
     async def fake_refresh_test_statuses(names: list[str]) -> None:
         return None
 
-    async def fake_build_targets(config, targets, on_output):
+    async def fake_build_targets(config, targets, on_output, on_start=None):
         events.append(f"build:{','.join(targets)}")
         return ProcessResult(command=("cmake",), returncode=0)
 
-    async def fake_run_test(config, test, on_output):
+    async def fake_run_test(config, test, on_output, on_start=None):
         events.append(f"test:{test.name}")
         return ProcessResult(command=("ctest",), returncode=0)
 
@@ -235,7 +244,7 @@ async def test_cancelling_run_marks_running_tests_cancelled(
     async def fake_refresh_test_statuses(names: list[str]) -> None:
         return None
 
-    async def fake_build_targets(config, targets, on_output):
+    async def fake_build_targets(config, targets, on_output, on_start=None):
         build_started.set()
         await asyncio.Future()
 
