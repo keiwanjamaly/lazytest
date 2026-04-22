@@ -10,7 +10,7 @@ from rich.style import Style
 from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.geometry import Offset
 from textual.selection import Selection
 from textual.strip import Strip
@@ -152,13 +152,12 @@ class LazytestApp(App[None]):
     }
 
     #left {
-        width: 42%;
+        height: 42%;
         border: solid $accent;
     }
 
     #output {
-        width: 58%;
-        height: 1fr;
+        height: 58%;
         border: solid $accent;
     }
     """
@@ -194,7 +193,7 @@ class LazytestApp(App[None]):
             id="search",
         )
         yield Static("Discovering tests...", id="summary")
-        with Horizontal(id="main"):
+        with Vertical(id="main"):
             with Vertical(id="left"):
                 tree: Tree[TestNodeData] = Tree("Tests", id="tests")
                 tree.show_root = False
