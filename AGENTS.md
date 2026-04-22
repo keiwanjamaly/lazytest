@@ -2,37 +2,34 @@
 
 ## Project Structure & Module Organization
 
-This repository is a minimal Python application scaffold. The entry point is `main.py`, which defines `main()` and runs it under the standard `if __name__ == "__main__"` guard. Project metadata lives in `pyproject.toml`, and `.python-version` pins Python `3.14`.
+`lazytest` is a Python 3.11+ Textual TUI for CMake/CTest projects. The console script is `lazytest = "lazytest.app:run"` and `main.py` is only a thin local entry point.
 
-There is no package directory or test suite yet. If the project grows, move reusable code into `lazytest/`, keep CLI startup code thin in `main.py`, and place tests under `tests/`.
+Core code lives in `lazytest/`: CTest discovery, search, target resolution, build command generation, process handling, session state, theme detection, and the Textual app. Tests live under `tests/`; keep non-UI behavior covered there and keep UI-specific tests focused on observable state.
 
 ## Build, Test, and Development Commands
 
-- `python main.py`: run the application directly.
-- `python -m py_compile main.py`: perform a quick syntax check without running the program.
-- `uv run python main.py`: run through `uv` if you are using the project scaffold created by `uv`.
-- `uv sync`: create or update the local virtual environment once dependencies are added to `pyproject.toml`.
+- `uv sync`: install project and development dependencies.
+- `uv run lazytest`: run the TUI from the checkout.
+- `uv run pytest`: run the full test suite.
+- `uv run python -m py_compile main.py lazytest/*.py tests/*.py`: quick syntax check.
+- `python main.py`: run the app if dependencies are available in the active environment.
 
-No build backend, formatter, linter, or test command is configured yet. Add tools to `pyproject.toml` before documenting them as required.
+The project uses Hatchling via `pyproject.toml`. Do not document new required tools until they are configured there.
 
 ## Coding Style & Naming Conventions
 
-Use standard Python style: 4-space indentation, function names in `snake_case`, constants in `UPPER_SNAKE_CASE`, and classes in `PascalCase`. Keep top-level executable behavior inside `main()` or small helper functions so modules remain importable.
+Use standard Python style: 4-space indentation, `snake_case` functions, `UPPER_SNAKE_CASE` constants, and `PascalCase` classes. Prefer explicit names and small functions. Add type hints for public or cross-module interfaces.
 
-Prefer explicit names over abbreviations. Keep functions focused and add type hints when they clarify public interfaces.
+Keep `app.py` focused on UI orchestration. Prefer shared helpers in existing modules for CTest parsing, process execution, target resolution, and command construction.
 
 ## Testing Guidelines
 
-There are no tests yet. When adding behavior beyond the current greeting, add `pytest` tests under `tests/`. Name test files `test_<module>.py` and test functions `test_<behavior>()`, for example `tests/test_main.py`.
+Use `pytest` for behavior changes. Name files `test_<module>.py` and test functions `test_<behavior>()`. Cover parsing, command construction, filtering, process cancellation, and state transitions with unit tests before widening UI tests.
 
-Once `pytest` is added, use `uv run pytest` or `python -m pytest`. Cover normal behavior and edge cases for parsing, I/O, or branching logic.
+Run `uv run pytest` before handing off changes. If a test cannot be run because it needs local CMake/CTest fixtures, state that explicitly.
 
 ## Commit & Pull Request Guidelines
 
-This repository has no existing commits, so no local commit convention is established. Use short, imperative commit subjects such as `Add CLI entry point` or `Document repository guidelines`. Keep unrelated changes in separate commits.
+Use short imperative commit subjects, for example `Fix executable grouping` or `Document abort shortcut`. Keep unrelated cleanup and behavior changes separate when practical.
 
-Pull requests should include a brief summary, test results or an explanation when tests are not applicable, and links to related issues.
-
-## Security & Configuration Tips
-
-Do not commit virtual environments, build artifacts, caches, or secrets. `.gitignore` already excludes `.venv`, Python bytecode, and distribution outputs. Keep local configuration in ignored files or environment variables.
+Pull requests should include a concise summary, test results, and any known limitations. Avoid committing virtual environments, caches, build artifacts, or secrets; `.gitignore` already covers the common Python outputs.

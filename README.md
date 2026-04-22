@@ -4,13 +4,13 @@
 
 ## Design
 
-The application is split so the UI stays thin:
+The application is split so the UI stays focused:
 
 - `lazytest/ctest_discovery.py`: invokes and parses `ctest --show-only=json-v1` output.
 - `lazytest/search.py`: case-insensitive filtering and deterministic ranking.
 - `lazytest/target_resolution.py`: maps a CTest test name to a CMake build target.
 - `lazytest/cmake_build.py`: generates and runs `cmake --build`.
-- `lazytest/test_runner.py`: generates and runs exact CTest selection commands.
+- `lazytest/test_runner.py`: runs discovered test commands, with exact CTest selection as the fallback path.
 - `lazytest/session.py`: tracks in-memory result state.
 - `lazytest/app.py`: Textual terminal UI.
 
@@ -23,7 +23,6 @@ lazytest/
   app.py
   cmake_build.py
   config.py
-  core_flow.py
   ctest_discovery.py
   models.py
   process_utils.py
@@ -108,12 +107,14 @@ Keybindings:
 - `f`: rerun failed tests
 - `a`: run filtered tests
 - `Ctrl+L`: clear output
+- `c`: copy current output buffer
+- `Ctrl+C`: abort active build or test work
 - `r`: rediscover tests
 - `Ctrl+Q`: quit
 
 Search text matches test names, labels, commands, working directories, and metadata. Prefix a term with `@` to require a matching CTest label, for example `@unit` or `math @unit @fast`.
 
-When several selected tests map to CMake targets, `lazytest` builds all required targets in one CMake invocation and then runs each CTest test in a separate subprocess with its own output heading.
+When several selected tests map to CMake targets, `lazytest` builds all required targets in one CMake invocation and then runs each test in a separate subprocess with its own output heading. If CTest did not report a direct command for a test, `lazytest` falls back to exact CTest selection.
 
 ## Test
 

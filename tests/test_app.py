@@ -46,8 +46,25 @@ def test_group_tests_by_executable_uses_ctest_command_executable() -> None:
 
     groups = app.group_tests_by_executable(tests)
 
-    assert list(groups) == ["unit_tests", "integration_tests"]
-    assert [test.name for test in groups["unit_tests"]] == ["a", "b"]
+    assert list(groups) == ["/tmp/build/unit_tests", "/tmp/build/integration_tests"]
+    assert [test.name for test in groups["/tmp/build/unit_tests"]] == ["a", "b"]
+    assert app.executable_label(tests[0]) == "unit_tests"
+
+
+def test_group_tests_by_executable_keeps_same_basenames_separate() -> None:
+    app = LazytestApp(AppConfig())
+    tests = [
+        DiscoveredTest("a", command=("/tmp/debug/check", "a")),
+        DiscoveredTest("b", command=("/tmp/release/check", "b")),
+    ]
+    app.visible_tests = tests
+
+    groups = app.group_tests_by_executable(tests)
+
+    assert list(groups) == ["/tmp/debug/check", "/tmp/release/check"]
+    assert [test.name for test in groups["/tmp/debug/check"]] == ["a"]
+    assert [test.name for test in groups["/tmp/release/check"]] == ["b"]
+    assert app.executable_display("/tmp/debug/check") == "/tmp/debug/check"
 
 
 def test_group_status_reports_cancelled_tests() -> None:
@@ -510,4 +527,4 @@ async def test_refresh_test_status_updates_tree_labels_without_rebuilding(
 
         assert clear_calls == 0
         assert app.test_nodes["unit.math.addition"].label.plain == "⟳ unit.math.addition"
-        assert app.group_nodes["unit_tests"].label.plain == "⟳ unit_tests (2)"
+        assert app.group_nodes["/tmp/build/unit_tests"].label.plain == "⟳ unit_tests (2)"

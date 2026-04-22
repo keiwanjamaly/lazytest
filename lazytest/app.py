@@ -49,6 +49,7 @@ STATUS_DISPLAYS = {
     TestStatus.PASSED: StatusDisplay("✓", "green"),
     TestStatus.FAILED: StatusDisplay("✗", "red"),
 }
+UNKNOWN_EXECUTABLE = "(unknown executable)"
 
 
 class OutputLog(RichLog):
@@ -327,13 +328,30 @@ class LazytestApp(App[None]):
     ) -> dict[str, list[DiscoveredTest]]:
         groups: dict[str, list[DiscoveredTest]] = {}
         for test in tests:
-            groups.setdefault(self.executable_label(test), []).append(test)
+            groups.setdefault(self.executable_identity(test), []).append(test)
         return groups
 
-    def executable_label(self, test: DiscoveredTest) -> str:
+    def executable_identity(self, test: DiscoveredTest) -> str:
         if test.command and test.command[0]:
-            return Path(test.command[0]).name
-        return "(unknown executable)"
+            return test.command[0]
+        return UNKNOWN_EXECUTABLE
+
+    def executable_label(self, test: DiscoveredTest) -> str:
+        return self.executable_display(self.executable_identity(test))
+
+    def executable_display(self, executable: str) -> str:
+        if executable == UNKNOWN_EXECUTABLE:
+            return executable
+        label = Path(executable).name
+        matching_identities = {
+            identity
+            for test in self.visible_tests
+            if (identity := self.executable_identity(test)) != UNKNOWN_EXECUTABLE
+            and Path(identity).name == label
+        }
+        if len(matching_identities) > 1:
+            return executable
+        return label
 
     def executable_output_key(self, executable: str) -> str:
         return f"executable:{executable}"
@@ -344,7 +362,8 @@ class LazytestApp(App[None]):
     def format_executable_group(self, executable: str, tests: list[DiscoveredTest]) -> str:
         status = self.group_status(tests)
         display = STATUS_DISPLAYS[status]
-        return f"[{display.style}]{display.marker} {escape(executable)} ({len(tests)})[/]"
+        label = self.executable_display(executable)
+        return f"[{display.style}]{display.marker} {escape(label)} ({len(tests)})[/]"
 
     def group_status(self, tests: list[DiscoveredTest]) -> TestStatus:
         statuses = {test.status for test in tests}
@@ -378,7 +397,7 @@ class LazytestApp(App[None]):
         return [
             test.name
             for test in self.visible_tests
-            if self.executable_label(test) == data.executable
+            if self.executable_identity(test) == data.executable
         ]
 
     def action_focus_search(self) -> None:
@@ -464,7 +483,7 @@ class LazytestApp(App[None]):
         ]
         group_keys = list(
             dict.fromkeys(
-                self.executable_output_key(self.executable_label(test))
+                self.executable_output_key(self.executable_identity(test))
                 for test in all_target_tests
             )
         )
@@ -575,7 +594,7 @@ class LazytestApp(App[None]):
             if test is None or node is None:
                 continue
             node.set_label(self.format_test(test))
-            updated_groups.add(self.executable_label(test))
+            updated_groups.add(self.executable_identity(test))
 
         for executable in updated_groups:
             node = self.group_nodes.get(executable)
@@ -584,7 +603,7 @@ class LazytestApp(App[None]):
             tests = [
                 self.session.tests_by_name[test.name]
                 for test in self.visible_tests
-                if self.executable_label(test) == executable
+                if self.executable_identity(test) == executable
             ]
             node.set_label(self.format_executable_group(executable, tests))
 
