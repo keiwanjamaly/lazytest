@@ -129,6 +129,31 @@ class OutputLog(RichLog):
         return Offset(x, y)
 
 
+class SearchInput(Input):
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "down":
+            event.stop()
+            self.screen.query_one("#tests", Tree).focus()
+
+
+class TestTree(Tree[TestNodeData]):
+    def action_cursor_up(self) -> None:
+        if self.cursor_line <= self.first_test_line():
+            self.screen.query_one("#search", Input).focus()
+            return
+        super().action_cursor_up()
+
+    def first_test_line(self) -> int:
+        if self.last_line < 0:
+            return 0
+        for line in range(max(0, self.last_line) + 1):
+            node = self.get_node_at_line(line)
+            data = node.data if node is not None else None
+            if isinstance(data, TestNodeData) and data.test_name is not None:
+                return line
+        return 0
+
+
 class LazytestApp(App[None]):
     TITLE = "lazytest"
 
@@ -188,14 +213,14 @@ class LazytestApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Input(
+        yield SearchInput(
             placeholder="Search tests by name, label, command, or working directory; use @label for tags",
             id="search",
         )
         yield Static("Discovering tests...", id="summary")
         with Vertical(id="main"):
             with Vertical(id="left"):
-                tree: Tree[TestNodeData] = Tree("Tests", id="tests")
+                tree: Tree[TestNodeData] = TestTree("Tests", id="tests")
                 tree.show_root = False
                 yield tree
             yield OutputLog(id="output", wrap=True, highlight=True)
@@ -212,7 +237,7 @@ class LazytestApp(App[None]):
     @on(Input.Submitted, "#search")
     def on_search_submitted(self, event: Input.Submitted) -> None:
         event.stop()
-        self.action_run_selected()
+        self.focus_tests()
 
     @on(Tree.NodeHighlighted, "#tests")
     def on_test_highlighted(self, event: Tree.NodeHighlighted) -> None:
@@ -350,6 +375,9 @@ class LazytestApp(App[None]):
     def action_focus_search(self) -> None:
         self.query_one("#search", Input).focus()
 
+    def focus_tests(self) -> None:
+        self.query_one("#tests", Tree).focus()
+
     def action_clear_search(self) -> None:
         self.query_one("#search", Input).value = ""
 
@@ -376,6 +404,9 @@ class LazytestApp(App[None]):
         self.run_worker(self.discover(), exclusive=True)
 
     def action_run_selected(self) -> None:
+        if self.focused is self.query_one("#search", Input):
+            self.focus_tests()
+            return
         names = self.selected_test_names()
         if names:
             self.run_tests_by_name(names)

@@ -5,7 +5,7 @@ from rich.text import Text
 from textual import events
 from textual.geometry import Offset
 from textual.selection import Selection
-from textual.widgets import Tree
+from textual.widgets import Input, Tree
 
 from lazytest.app import LazytestApp, OutputLog
 from lazytest.config import AppConfig
@@ -271,6 +271,62 @@ async def test_output_mouse_drag_copies_text_and_clears_selection(
         assert copied == ["first"]
         assert notifications == ["Selection copied to clipboard."]
         assert app.screen.selections == {}
+
+
+@pytest.mark.asyncio
+async def test_arrow_up_from_first_test_focuses_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition", command=("/tmp/build/unit_tests",)),
+            DiscoveredTest("unit.math.subtraction", command=("/tmp/build/unit_tests",)),
+        ]
+    )
+
+    async with app.run_test() as pilot:
+        await app.apply_filter("", None)
+        tree = app.query_one("#tests", Tree)
+        tree.focus()
+        await pilot.pause()
+
+        await pilot.press("up")
+
+        assert app.focused is app.query_one("#search", Input)
+
+
+@pytest.mark.asyncio
+async def test_search_down_and_enter_focus_tests_without_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests([DiscoveredTest("unit.math.addition")])
+    requested_names: list[str] = []
+
+    monkeypatch.setattr(app, "run_tests_by_name", requested_names.extend)
+
+    async with app.run_test() as pilot:
+        await app.apply_filter("", None)
+        search = app.query_one("#search", Input)
+        tree = app.query_one("#tests", Tree)
+
+        search.focus()
+        await pilot.press("down")
+        assert app.focused is tree
+
+        search.focus()
+        await pilot.press("enter")
+        assert app.focused is tree
+        assert requested_names == []
 
 
 @pytest.mark.asyncio
