@@ -6,10 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rich.markup import escape
-from textual import on, work
+from rich.style import Style
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.geometry import Offset
+from textual.selection import Selection
+from textual.strip import Strip
 from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
 from textual.widgets.tree import TreeNode
 
@@ -44,6 +48,85 @@ STATUS_DISPLAYS = {
     TestStatus.PASSED: StatusDisplay("✓", "green"),
     TestStatus.FAILED: StatusDisplay("✗", "red"),
 }
+
+
+class OutputLog(RichLog):
+    can_focus = False
+    FOCUS_ON_CLICK = False
+    SELECTION_STYLE = Style(reverse=True)
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._selection_anchor: Offset | None = None
+
+    def get_selection(self, selection: Selection) -> tuple[str, str]:
+        text = "\n".join(line.text.rstrip() for line in self.lines)
+        return selection.extract(text), "\n"
+
+    def render_line(self, y: int) -> Strip:
+        line = super().render_line(y)
+        selection = self.screen.selections.get(self)
+        if selection is None:
+            return line
+        start, end = selection.get_span(y + self.scroll_offset.y) or (0, 0)
+        if start == end:
+            return line
+        start -= self.scroll_offset.x
+        end -= self.scroll_offset.x
+        return Strip.join(
+            [
+                line.crop(0, start),
+                line.crop(start, end).apply_style(self.SELECTION_STYLE),
+                line.crop(end),
+            ]
+        )
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        offset = self._event_to_text_offset(event)
+        if offset is None:
+            return
+        event.stop()
+        self.capture_mouse()
+        self._selection_anchor = offset
+        self.screen.selections = {self: Selection(offset, offset)}
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        if self._selection_anchor is None:
+            return
+        offset = self._event_to_text_offset(event)
+        if offset is None:
+            return
+        event.stop()
+        self.screen.selections = {
+            self: Selection.from_offsets(self._selection_anchor, offset)
+        }
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        if self._selection_anchor is None:
+            return
+        event.stop()
+        offset = self._event_to_text_offset(event)
+        if offset is not None:
+            self.screen.selections = {
+                self: Selection.from_offsets(self._selection_anchor, offset)
+            }
+        selected_text = self.screen.get_selected_text()
+        self.release_mouse()
+        self._selection_anchor = None
+        self.screen.clear_selection()
+        if selected_text:
+            self.app.copy_to_clipboard(selected_text)
+            self.app.notify("Selection copied to clipboard.")
+
+    def _event_to_text_offset(self, event: events.MouseEvent) -> Offset | None:
+        if not self.lines:
+            return None
+        x = int(event.screen_x) - self.scrollable_content_region.x + self.scroll_offset.x
+        y = int(event.screen_y) - self.scrollable_content_region.y + self.scroll_offset.y
+        y = max(0, min(y, len(self.lines) - 1))
+        line_width = len(self.lines[y].text.rstrip())
+        x = max(0, min(x, line_width))
+        return Offset(x, y)
 
 
 class LazytestApp(App[None]):
@@ -116,7 +199,7 @@ class LazytestApp(App[None]):
                 tree: Tree[TestNodeData] = Tree("Tests", id="tests")
                 tree.show_root = False
                 yield tree
-            yield RichLog(id="output", wrap=True, highlight=True)
+            yield OutputLog(id="output", wrap=True, highlight=True)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -137,6 +220,21 @@ class LazytestApp(App[None]):
         data = event.node.data
         if isinstance(data, TestNodeData):
             self.show_output(data.output_key)
+
+    @on(events.TextSelected)
+    def on_text_selected(self, event: events.TextSelected) -> None:
+        output = self.query_one("#output", OutputLog)
+        selection = self.screen.selections.get(output)
+        if selection is None:
+            return
+        selected_text = output.get_selection(selection)
+        if selected_text is None:
+            return
+        text = "".join(selected_text).rstrip("\n")
+        if not text:
+            return
+        self.copy_to_clipboard(text)
+        self.screen.clear_selection()
 
     async def discover(self) -> None:
         await self.append_output(f"$ {' '.join(discovery_command(self.config))}")

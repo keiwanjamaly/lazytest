@@ -2,9 +2,12 @@ import asyncio
 
 import pytest
 from rich.text import Text
+from textual import events
+from textual.geometry import Offset
+from textual.selection import Selection
 from textual.widgets import Tree
 
-from lazytest.app import LazytestApp
+from lazytest.app import LazytestApp, OutputLog
 from lazytest.config import AppConfig
 from lazytest.models import DiscoveredTest, ProcessResult, TestStatus as Status
 from lazytest.session import TestSession as Session
@@ -179,6 +182,95 @@ def test_copy_output_warns_when_active_output_is_empty(
 
     assert copied == []
     assert notifications == [("No output to copy.", "warning")]
+
+
+def test_output_log_is_selectable_without_being_focusable() -> None:
+    assert OutputLog.can_focus is False
+    assert OutputLog.FOCUS_ON_CLICK is False
+    assert OutputLog.ALLOW_SELECT is True
+
+
+@pytest.mark.asyncio
+async def test_output_selection_is_rendered_visibly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test(size=(100, 30)):
+        output = app.query_one("#output", OutputLog)
+        output.write("first line")
+        app.screen.selections = {
+            output: Selection(Offset(0, 0), Offset(5, 0)),
+        }
+
+        rendered = output.render_line(0)
+        selected = rendered.crop(0, 5)
+        unselected = rendered.crop(5, 10)
+
+        assert selected.text == "first"
+        assert "reverse" in str(selected._segments[0].style)
+        assert "reverse" not in str(unselected._segments[0].style)
+
+
+@pytest.mark.asyncio
+async def test_output_selection_copies_text_and_clears_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    copied: list[str] = []
+
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+
+    async with app.run_test():
+        output = app.query_one("#output", OutputLog)
+        output.write("first line")
+        output.write("second line")
+        app.screen.selections = {
+            output: Selection(Offset(0, 0), Offset(5, 0)),
+        }
+
+        app.on_text_selected(events.TextSelected())
+
+        assert copied == ["first"]
+        assert app.screen.selections == {}
+
+
+@pytest.mark.asyncio
+async def test_output_mouse_drag_copies_text_and_clears_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    copied: list[str] = []
+    notifications: list[str] = []
+
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: notifications.append(message))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        output = app.query_one("#output", OutputLog)
+        output.write("first line")
+        await pilot.pause()
+
+        await pilot.mouse_down(output, offset=(1, 1))
+        await pilot.hover(output, offset=(6, 1))
+        await pilot.mouse_up(output, offset=(6, 1))
+        await pilot.pause()
+
+        assert copied == ["first"]
+        assert notifications == ["Selection copied to clipboard."]
+        assert app.screen.selections == {}
 
 
 @pytest.mark.asyncio
