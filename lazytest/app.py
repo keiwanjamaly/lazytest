@@ -207,6 +207,7 @@ class LazytestApp(App[None]):
         self.session = TestSession()
         self.visible_tests: list[DiscoveredTest] = []
         self.output_buffers: dict[str, list[str]] = {"session": []}
+        self.output_titles: dict[str, str] = {"session": "Output"}
         self.active_output_key = "session"
         self.test_nodes: dict[str, TreeNode[TestNodeData]] = {}
         self.group_nodes: dict[str, TreeNode[TestNodeData]] = {}
@@ -382,8 +383,7 @@ class LazytestApp(App[None]):
         self.query_one("#search", Input).value = ""
 
     def action_clear_output(self) -> None:
-        self.output_buffers[self.active_output_key] = []
-        self.render_output()
+        self.clear_output(self.active_output_key)
 
     def action_copy_output(self) -> None:
         text = self.active_output_text()
@@ -470,6 +470,12 @@ class LazytestApp(App[None]):
             for group_key in group_keys:
                 await self.append_output(text, key=group_key)
 
+        async def append_build_process_id(pid: int) -> None:
+            self.set_output_process_id(pid)
+            for group_key in group_keys:
+                self.set_output_process_id(pid, key=group_key)
+            await append_build_output(f"process id: {pid}\n")
+
         for test in all_target_tests:
             self.session.set_status(test.name, TestStatus.RUNNING)
         await self.refresh_test_statuses([test.name for test in all_target_tests])
@@ -484,7 +490,7 @@ class LazytestApp(App[None]):
                 self.config,
                 targets,
                 append_build_output,
-                on_start=lambda pid: append_build_output(f"process id: {pid}\n"),
+                on_start=append_build_process_id,
             )
             if not build_result.ok:
                 for test in all_target_tests:
@@ -542,7 +548,13 @@ class LazytestApp(App[None]):
         return f"ctest {test.name}"
 
     async def append_process_id(self, pid: int, *, key: str = "session") -> None:
+        self.set_output_process_id(pid, key=key)
         await self.append_output(f"process id: {pid}\n", key=key)
+
+    def set_output_process_id(self, pid: int, *, key: str = "session") -> None:
+        self.output_titles[key] = f"pid {pid}"
+        if key == self.active_output_key and self.is_running:
+            self.update_output_title()
 
     async def refresh_test_status(self, name: str) -> None:
         await self.refresh_test_statuses([name])
@@ -570,19 +582,26 @@ class LazytestApp(App[None]):
 
     def clear_output(self, key: str) -> None:
         self.output_buffers[key] = []
+        self.output_titles[key] = "Output"
         if key == self.active_output_key:
             self.render_output()
 
     def show_output(self, key: str) -> None:
         self.output_buffers.setdefault(key, [])
+        self.output_titles.setdefault(key, "Output")
         self.active_output_key = key
         self.render_output()
 
     def render_output(self) -> None:
-        output = self.query_one("#output", RichLog)
+        output = self.query_one("#output", OutputLog)
         output.clear()
+        self.update_output_title()
         for text in self.output_buffers.get(self.active_output_key, []):
             output.write(text.rstrip("\n"))
+
+    def update_output_title(self) -> None:
+        output = self.query_one("#output", OutputLog)
+        output.border_title = self.output_titles.get(self.active_output_key, "Output")
 
     def active_output_text(self) -> str:
         return "".join(self.output_buffers.get(self.active_output_key, []))
@@ -590,7 +609,7 @@ class LazytestApp(App[None]):
     async def append_output(self, text: str, *, key: str = "session") -> None:
         self.output_buffers.setdefault(key, []).append(text)
         if key == self.active_output_key:
-            self.query_one("#output", RichLog).write(text.rstrip("\n"))
+            self.query_one("#output", OutputLog).write(text.rstrip("\n"))
 
 
 def run() -> None:

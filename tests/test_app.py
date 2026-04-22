@@ -191,6 +191,56 @@ def test_output_log_is_selectable_without_being_focusable() -> None:
 
 
 @pytest.mark.asyncio
+async def test_output_title_shows_active_process_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test():
+        output = app.query_one("#output", OutputLog)
+
+        await app.append_process_id(4321)
+
+        assert output.border_title == "pid 4321"
+
+        app.action_clear_output()
+
+        assert output.border_title == "Output"
+
+
+@pytest.mark.asyncio
+async def test_output_title_follows_visible_output_buffer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test():
+        output = app.query_one("#output", OutputLog)
+
+        app.show_output("test:unit.math.addition")
+        await app.append_process_id(2002, key="test:unit.math.addition")
+        await app.append_process_id(2003, key="test:unit.math.subtraction")
+
+        assert output.border_title == "pid 2002"
+
+        app.show_output("test:unit.math.subtraction")
+
+        assert output.border_title == "pid 2003"
+
+        app.clear_output("test:unit.math.subtraction")
+
+        assert output.border_title == "Output"
+
+
+@pytest.mark.asyncio
 async def test_output_selection_is_rendered_visibly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
