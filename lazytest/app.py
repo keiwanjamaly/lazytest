@@ -26,6 +26,7 @@ from lazytest.search import filter_tests, preserve_selection
 from lazytest.session import TestSession
 from lazytest.target_resolution import resolve_target
 from lazytest.test_runner import run_test
+from lazytest.theme import system_theme
 
 
 @dataclass(frozen=True)
@@ -203,6 +204,7 @@ class LazytestApp(App[None]):
 
     def __init__(self, config: AppConfig | None = None) -> None:
         super().__init__()
+        self.sync_system_theme()
         self.config = config or load_config(Path.cwd())
         self.session = TestSession()
         self.visible_tests: list[DiscoveredTest] = []
@@ -228,7 +230,13 @@ class LazytestApp(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
+        self.set_interval(2, self.sync_system_theme)
         await self.discover()
+
+    def sync_system_theme(self) -> None:
+        theme = system_theme()
+        if self.theme != theme:
+            self.theme = theme
 
     @on(Input.Changed, "#search")
     async def on_search_changed(self, event: Input.Changed) -> None:

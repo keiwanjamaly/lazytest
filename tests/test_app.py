@@ -190,6 +190,14 @@ def test_output_log_is_selectable_without_being_focusable() -> None:
     assert OutputLog.ALLOW_SELECT is True
 
 
+def test_app_uses_system_theme(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("lazytest.app.system_theme", lambda: "textual-light")
+
+    app = LazytestApp(AppConfig())
+
+    assert app.theme == "textual-light"
+
+
 @pytest.mark.asyncio
 async def test_output_title_shows_active_process_id(
     monkeypatch: pytest.MonkeyPatch,
