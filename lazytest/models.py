@@ -8,6 +8,7 @@ from pathlib import Path
 class TestStatus(str, Enum):
     UNKNOWN = "unknown"
     RUNNING = "running"
+    CANCELLED = "cancelled"
     PASSED = "passed"
     FAILED = "failed"
 

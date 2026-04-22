@@ -39,6 +39,7 @@ class TestNodeData:
 STATUS_DISPLAYS = {
     TestStatus.UNKNOWN: StatusDisplay("○", "dim"),
     TestStatus.RUNNING: StatusDisplay("⟳", "yellow"),
+    TestStatus.CANCELLED: StatusDisplay("■", "yellow"),
     TestStatus.PASSED: StatusDisplay("✓", "green"),
     TestStatus.FAILED: StatusDisplay("✗", "red"),
 }
@@ -73,6 +74,7 @@ class LazytestApp(App[None]):
 
     #output {
         width: 58%;
+        height: 1fr;
         border: solid $accent;
     }
     """
@@ -86,6 +88,8 @@ class LazytestApp(App[None]):
         Binding("f", "run_failed", "Run failed"),
         Binding("a", "run_all", "Run filtered"),
         Binding("ctrl+l", "clear_output", "Clear output"),
+        Binding("c", "copy_output", "Copy output"),
+        Binding("ctrl+c", "abort_run", "Abort"),
         Binding("r", "refresh", "Refresh"),
     ]
 
@@ -216,6 +220,8 @@ class LazytestApp(App[None]):
             return TestStatus.RUNNING
         if TestStatus.FAILED in statuses:
             return TestStatus.FAILED
+        if TestStatus.CANCELLED in statuses:
+            return TestStatus.CANCELLED
         if statuses == {TestStatus.PASSED}:
             return TestStatus.PASSED
         return TestStatus.UNKNOWN
@@ -253,6 +259,21 @@ class LazytestApp(App[None]):
         self.output_buffers[self.active_output_key] = []
         self.render_output()
 
+    def action_copy_output(self) -> None:
+        text = self.active_output_text()
+        if not text:
+            self.notify("No output to copy.", severity="warning")
+            return
+        self.copy_to_clipboard(text)
+        self.notify("Output copied to clipboard.")
+
+    def action_abort_run(self) -> None:
+        cancelled = self.workers.cancel_group(self, "run")
+        if cancelled:
+            self.notify("Aborting current build/tests.", severity="warning")
+            return
+        self.notify("No active build or test run.", severity="warning")
+
     def action_refresh(self) -> None:
         self.run_worker(self.discover(), exclusive=True)
 
@@ -267,7 +288,7 @@ class LazytestApp(App[None]):
     def action_run_all(self) -> None:
         self.run_tests_by_name([test.name for test in self.visible_tests])
 
-    @work(exclusive=True)
+    @work(exclusive=True, group="run")
     async def run_tests_by_name(self, names: list[str]) -> None:
         await self._run_tests_by_name(names)
 
@@ -329,29 +350,41 @@ class LazytestApp(App[None]):
             await append_build_output(f"$ cmake --build target {targets[0]} ({reason})\n")
         else:
             await append_build_output(f"$ cmake --build targets {', '.join(targets)}\n")
-        build_result = await build_targets(self.config, targets, append_build_output)
-        if not build_result.ok:
-            for test in all_target_tests:
-                self.session.set_status(test.name, TestStatus.FAILED)
-            await self.refresh_test_statuses([test.name for test in all_target_tests])
-            return
+        try:
+            build_result = await build_targets(self.config, targets, append_build_output)
+            if not build_result.ok:
+                for test in all_target_tests:
+                    self.session.set_status(test.name, TestStatus.FAILED)
+                await self.refresh_test_statuses([test.name for test in all_target_tests])
+                return
 
-        for _, target_tests in tests_by_target.values():
-            for test in target_tests:
-                test_key = self.test_output_key(test.name)
-                self.show_output(test_key)
-                await self.append_output(f"$ ctest {test.name}\n", key=test_key)
-                test_result = await run_test(
-                    self.config,
-                    test,
-                    lambda text, key=test_key: self.append_output(text, key=key),
-                )
-                self.session.set_status(
-                    test.name,
-                    TestStatus.PASSED if test_result.ok else TestStatus.FAILED,
-                )
-                await self.refresh_test_status(test.name)
-                await asyncio.sleep(0)
+            for _, target_tests in tests_by_target.values():
+                for test in target_tests:
+                    test_key = self.test_output_key(test.name)
+                    self.show_output(test_key)
+                    await self.append_output(f"$ ctest {test.name}\n", key=test_key)
+                    test_result = await run_test(
+                        self.config,
+                        test,
+                        lambda text, key=test_key: self.append_output(text, key=key),
+                    )
+                    self.session.set_status(
+                        test.name,
+                        TestStatus.PASSED if test_result.ok else TestStatus.FAILED,
+                    )
+                    await self.refresh_test_status(test.name)
+                    await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            cancelled_names = [
+                test.name
+                for test in all_target_tests
+                if self.session.tests_by_name[test.name].status is TestStatus.RUNNING
+            ]
+            for name in cancelled_names:
+                self.session.set_status(name, TestStatus.CANCELLED)
+            await self.refresh_test_statuses(cancelled_names)
+            await self.append_output("Run aborted.\n")
+            raise
 
     def tests_for_names(self, names: list[str]) -> list[DiscoveredTest]:
         tests: list[DiscoveredTest] = []
@@ -404,6 +437,9 @@ class LazytestApp(App[None]):
         output.clear()
         for text in self.output_buffers.get(self.active_output_key, []):
             output.write(text.rstrip("\n"))
+
+    def active_output_text(self) -> str:
+        return "".join(self.output_buffers.get(self.active_output_key, []))
 
     async def append_output(self, text: str, *, key: str = "session") -> None:
         self.output_buffers.setdefault(key, []).append(text)

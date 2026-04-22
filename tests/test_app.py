@@ -1,5 +1,7 @@
-from rich.text import Text
+import asyncio
+
 import pytest
+from rich.text import Text
 from textual.widgets import Tree
 
 from lazytest.app import LazytestApp
@@ -13,6 +15,7 @@ def test_format_test_uses_colored_status_markers() -> None:
 
     assert app.format_test(DiscoveredTest("not.run")) == "[dim]○ not.run[/]"
     assert app.format_test(DiscoveredTest("active", status=Status.RUNNING)) == "[yellow]⟳ active[/]"
+    assert app.format_test(DiscoveredTest("stopped", status=Status.CANCELLED)) == "[yellow]■ stopped[/]"
     assert app.format_test(DiscoveredTest("ok", status=Status.PASSED)) == "[green]✓ ok[/]"
     assert app.format_test(DiscoveredTest("bad", status=Status.FAILED)) == "[red]✗ bad[/]"
 
@@ -42,6 +45,12 @@ def test_group_tests_by_executable_uses_ctest_command_executable() -> None:
 
     assert list(groups) == ["unit_tests", "integration_tests"]
     assert [test.name for test in groups["unit_tests"]] == ["a", "b"]
+
+
+def test_group_status_reports_cancelled_tests() -> None:
+    app = LazytestApp(AppConfig())
+
+    assert app.group_status([DiscoveredTest("stopped", status=Status.CANCELLED)]) is Status.CANCELLED
 
 
 @pytest.mark.asyncio
@@ -122,6 +131,47 @@ def test_run_all_uses_visible_filtered_tests(monkeypatch: pytest.MonkeyPatch) ->
     assert requested_names == ["unit.db.insert"]
 
 
+def test_copy_output_uses_active_output_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = LazytestApp(AppConfig())
+    app.active_output_key = "test:unit.math.addition"
+    app.output_buffers["test:unit.math.addition"] = [
+        "$ ctest unit.math.addition\n",
+        "first line\nsecond line\n",
+    ]
+    copied: list[str] = []
+    notifications: list[str] = []
+
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: notifications.append(message))
+
+    app.action_copy_output()
+
+    assert copied == ["$ ctest unit.math.addition\nfirst line\nsecond line\n"]
+    assert notifications == ["Output copied to clipboard."]
+
+
+def test_copy_output_warns_when_active_output_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = LazytestApp(AppConfig())
+    copied: list[str] = []
+    notifications: list[tuple[str, str | None]] = []
+
+    monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+    monkeypatch.setattr(
+        app,
+        "notify",
+        lambda message, **kwargs: notifications.append(
+            (message, kwargs.get("severity"))
+        ),
+    )
+
+    app.action_copy_output()
+
+    assert copied == []
+    assert notifications == [("No output to copy.", "warning")]
+
+
 @pytest.mark.asyncio
 async def test_run_tests_by_name_builds_all_required_targets_at_once(
     monkeypatch: pytest.MonkeyPatch,
@@ -166,6 +216,49 @@ async def test_run_tests_by_name_builds_all_required_targets_at_once(
         "test:unit.math.addition",
         "test:integration.api.health",
     ]
+
+
+@pytest.mark.asyncio
+async def test_cancelling_run_marks_running_tests_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = LazytestApp(AppConfig(default_build_target="unit_tests"))
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition"),
+            DiscoveredTest("unit.math.subtraction"),
+        ]
+    )
+    build_started = asyncio.Event()
+    output: list[str] = []
+
+    async def fake_refresh_test_statuses(names: list[str]) -> None:
+        return None
+
+    async def fake_build_targets(config, targets, on_output):
+        build_started.set()
+        await asyncio.Future()
+
+    async def fake_append_output(text: str, *, key: str = "session") -> None:
+        output.append(text)
+
+    monkeypatch.setattr(app, "refresh_test_statuses", fake_refresh_test_statuses)
+    monkeypatch.setattr(app, "show_output", lambda key: None)
+    monkeypatch.setattr(app, "append_output", fake_append_output)
+    monkeypatch.setattr("lazytest.app.build_targets", fake_build_targets)
+
+    task = asyncio.create_task(
+        app._run_tests_by_name(["unit.math.addition", "unit.math.subtraction"])
+    )
+    await build_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert app.session.tests_by_name["unit.math.addition"].status is Status.CANCELLED
+    assert app.session.tests_by_name["unit.math.subtraction"].status is Status.CANCELLED
+    assert output[-1] == "Run aborted.\n"
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,5 @@
+import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,41 @@ async def test_process_error_for_missing_executable() -> None:
 
     assert result.returncode == 127
     assert "Executable not found" in "".join(output)
+
+
+@pytest.mark.asyncio
+async def test_process_cancellation_terminates_running_process(tmp_path: Path) -> None:
+    marker = tmp_path / "terminated.txt"
+    output: list[str] = []
+    code = """
+import pathlib
+import signal
+import sys
+import time
+
+def handle_sigterm(signum, frame):
+    pathlib.Path(sys.argv[1]).write_text("terminated", encoding="utf-8")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
+print("ready", flush=True)
+time.sleep(60)
+"""
+
+    task = asyncio.create_task(
+        run_streaming([sys.executable, "-c", code, str(marker)], on_output=output.append)
+    )
+    for _ in range(100):
+        if output:
+            break
+        await asyncio.sleep(0.01)
+    assert output == ["ready\n"]
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert marker.read_text(encoding="utf-8") == "terminated"
 
 
 @pytest.mark.asyncio
