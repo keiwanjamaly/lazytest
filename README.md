@@ -111,6 +111,8 @@ Keybindings:
 - `r`: rediscover tests
 - `Ctrl+Q`: quit
 
+Search text matches test names, labels, commands, working directories, and metadata. Prefix a term with `@` to require a matching CTest label, for example `@unit` or `math @unit @fast`.
+
 When several selected tests map to CMake targets, `lazytest` builds all required targets in one CMake invocation and then runs each CTest test in a separate subprocess with its own output heading.
 
 ## Test
