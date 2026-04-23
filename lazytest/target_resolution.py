@@ -16,9 +16,13 @@ NON_TARGET_EXECUTABLES = {
     "ctest",
     "env",
     "fish",
+    "mpiexec",
+    "mpirun",
+    "orterun",
     "python",
     "python3",
     "sh",
+    "srun",
     "zsh",
 }
 
@@ -95,16 +99,25 @@ def explicit_build_target(test: DiscoveredTest) -> str | None:
 
 
 def direct_executable_target(test: DiscoveredTest) -> str | None:
+    executable = discovered_executable(test)
+    if executable is None:
+        return None
+    return Path(executable).name
+
+
+def discovered_executable(test: DiscoveredTest) -> str | None:
     if not test.command:
         return None
-    executable = test.command[0]
-    path = Path(executable)
-    if not (path.is_absolute() or "/" in executable or "\\" in executable):
-        return None
-    name = path.name
-    if not name or name in NON_TARGET_EXECUTABLES:
-        return None
-    return name
+
+    direct_executable = _executable_token(test.command[0], allow_relative=True)
+    if direct_executable is not None:
+        return direct_executable
+
+    for token in command_tokens(test.command)[1:]:
+        executable = _executable_token(token, allow_relative=False)
+        if executable is not None:
+            return executable
+    return None
 
 
 def _cmake_invocation_target(tokens: tuple[str, ...]) -> str | None:
@@ -168,3 +181,18 @@ def command_tokens(command: tuple[str, ...]) -> tuple[str, ...]:
         if len(split) > 1:
             tokens.extend(split)
     return tuple(tokens)
+
+
+def _executable_token(token: str, *, allow_relative: bool) -> str | None:
+    if not token or token in COMMAND_SEPARATORS or token.startswith("-"):
+        return None
+
+    path = Path(token)
+    name = path.name
+    if not name or name in NON_TARGET_EXECUTABLES:
+        return None
+    if path.is_absolute():
+        return str(path)
+    if allow_relative and ("/" in token or "\\" in token):
+        return str(path)
+    return None

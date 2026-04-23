@@ -153,6 +153,26 @@ def test_resolve_target_uses_explicit_cmake_build_target_with_absolute_cmake_pat
     assert result.target == "wrapped_tests"
 
 
+def test_resolve_target_uses_absolute_wrapped_executable_path_without_file_api_match() -> None:
+    result = resolve_target(
+        DiscoveredTest(
+            name="legacy.random.check1",
+            command=(
+                "/opt/homebrew/bin/mpiexec",
+                "-n",
+                "4",
+                "/tmp/build/openqcd_devel_random_check1",
+            ),
+            working_directory=Path("/tmp/build/test_runs/legacy.random.check1"),
+        ),
+        AppConfig(build_dir=Path("/tmp/build")),
+        ExecutableArtifactIndex(),
+    )
+
+    assert result.target == "openqcd_devel_random_check1"
+    assert "direct CTest executable path" in result.reason
+
+
 def test_resolve_target_infers_direct_executable_path_without_file_api_match() -> None:
     result = resolve_target(
         DiscoveredTest(

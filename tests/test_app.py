@@ -100,6 +100,28 @@ def test_group_tests_by_executable_uses_file_api_artifact_for_wrapper() -> None:
     assert app.executable_label(tests[0]) == "test-wrapper-case"
 
 
+def test_group_tests_by_executable_uses_wrapped_absolute_binary_without_file_api() -> None:
+    app = LazytestApp(AppConfig(build_dir=Path("/tmp/build")))
+    tests = [
+        DiscoveredTest(
+            "legacy.random.check1",
+            command=(
+                "/opt/homebrew/bin/mpiexec",
+                "-n",
+                "4",
+                "/tmp/build/openqcd_devel_random_check1",
+            ),
+            working_directory=Path("/tmp/build/test_runs/legacy.random.check1"),
+        ),
+    ]
+    app.visible_tests = tests
+
+    groups = app.group_tests_by_executable(tests)
+
+    assert list(groups) == ["/tmp/build/openqcd_devel_random_check1"]
+    assert app.executable_label(tests[0]) == "openqcd_devel_random_check1"
+
+
 def test_group_formatting_reuses_cached_executable_identities() -> None:
     class CountingArtifacts:
         def __init__(self) -> None:

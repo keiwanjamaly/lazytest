@@ -116,3 +116,69 @@ add_test(
     resolution = resolve_target(test, AppConfig(build_dir=build_dir))
 
     assert resolution.target == "test-wrapper-case"
+
+
+def test_openqcd_style_mpi_wrapped_target_resolves_without_file_api(tmp_path: Path) -> None:
+    if shutil.which("cmake") is None or shutil.which("ctest") is None:
+        pytest.skip("cmake or ctest is unavailable")
+
+    source_dir = tmp_path / "source"
+    build_dir = tmp_path / "build"
+    source_dir.mkdir()
+    launcher = source_dir / "mpiexec"
+    launcher.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"-n\" ]; then\n"
+        "  shift 2\n"
+        "fi\n"
+        "exec \"$@\"\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    (source_dir / "CMakeLists.txt").write_text(
+        f"""
+cmake_minimum_required(VERSION 3.20)
+project(LazytestOpenQcdStyle C)
+
+file(WRITE "${{CMAKE_BINARY_DIR}}/main.c" "int main(void) {{ return 0; }}\\n")
+add_executable(openqcd_devel_random_check1 "${{CMAKE_BINARY_DIR}}/main.c")
+
+enable_testing()
+add_test(
+  NAME legacy.random.check1
+  COMMAND "{launcher}" -n 4 "$<TARGET_FILE:openqcd_devel_random_check1>"
+)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    configure = subprocess.run(
+        ["cmake", "-S", str(source_dir), "-B", str(build_dir)],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if configure.returncode != 0:
+        pytest.skip(f"cmake configure failed: {configure.stdout}")
+
+    ctest = subprocess.run(
+        ["ctest", "--show-only=json-v1", "--test-dir", str(build_dir)],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    tests = parse_ctest_json(ctest.stdout)
+    assert len(tests) == 1
+    test = tests[0]
+    assert test.command == (
+        str(launcher),
+        "-n",
+        "4",
+        str(build_dir / "openqcd_devel_random_check1"),
+    )
+
+    resolution = resolve_target(test, AppConfig(build_dir=build_dir))
+
+    assert resolution.target == "openqcd_devel_random_check1"

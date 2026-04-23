@@ -26,7 +26,7 @@ from lazytest.models import DiscoveredTest, TestStatus
 from lazytest.process_utils import collect_command
 from lazytest.search import filter_tests, preserve_selection
 from lazytest.session import TestSession
-from lazytest.target_resolution import resolve_target
+from lazytest.target_resolution import discovered_executable, resolve_target
 from lazytest.test_runner import run_test
 from lazytest.theme import system_theme
 
@@ -420,6 +420,9 @@ class LazytestApp(App[None]):
         artifact = self.executable_artifacts.match_test_command(test, self.config.build_dir)
         if artifact is not None:
             return str(artifact.path)
+        executable = discovered_executable(test)
+        if executable is not None:
+            return executable
         if test.command and test.command[0]:
             return test.command[0]
         return UNKNOWN_EXECUTABLE
