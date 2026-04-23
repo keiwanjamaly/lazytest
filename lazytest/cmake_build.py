@@ -19,11 +19,17 @@ def build_command(config: AppConfig, targets: str | Sequence[str]) -> list[str]:
         command.extend(["--preset", config.build_preset])
     else:
         command.append(str(config.build_dir))
+    if not _has_config_arg(config.extra_build_args):
+        command.extend(["--config", "Release"])
     command.append("--target")
     command.extend(target_names)
     command.extend(["--parallel", jobs])
     command.extend(config.extra_build_args)
     return command
+
+
+def _has_config_arg(args: Sequence[str]) -> bool:
+    return any(arg == "--config" or arg.startswith("--config=") for arg in args)
 
 
 async def build_targets(

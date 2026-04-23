@@ -18,6 +18,8 @@ def test_build_command_uses_cmake_build_and_parallel(monkeypatch: pytest.MonkeyP
         "cmake",
         "--build",
         "/tmp/build",
+        "--config",
+        "Release",
         "--target",
         "unit_tests",
         "--parallel",
@@ -30,7 +32,36 @@ def test_build_command_supports_build_preset(monkeypatch: pytest.MonkeyPatch) ->
 
     command = build_command(AppConfig(build_preset="debug"), "unit_tests")
 
-    assert command[:5] == ["cmake", "--build", "--preset", "debug", "--target"]
+    assert command[:7] == [
+        "cmake",
+        "--build",
+        "--preset",
+        "debug",
+        "--config",
+        "Release",
+        "--target",
+    ]
+
+
+def test_build_command_respects_explicit_build_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("lazytest.cmake_build.os.cpu_count", lambda: 4)
+
+    command = build_command(
+        AppConfig(build_dir=Path("/tmp/build"), extra_build_args=("--config", "Debug")),
+        "unit_tests",
+    )
+
+    assert command == [
+        "cmake",
+        "--build",
+        "/tmp/build",
+        "--target",
+        "unit_tests",
+        "--parallel",
+        "4",
+        "--config",
+        "Debug",
+    ]
 
 
 def test_build_command_supports_multiple_targets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -42,6 +73,8 @@ def test_build_command_supports_multiple_targets(monkeypatch: pytest.MonkeyPatch
         "cmake",
         "--build",
         "/tmp/build",
+        "--config",
+        "Release",
         "--target",
         "unit",
         "integration",

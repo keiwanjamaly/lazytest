@@ -51,6 +51,7 @@ target = "unit_tests"
 ```
 
 For `pyproject.toml`, use `[[tool.lazytest.target_mappings]]` instead of `[[lazytest.target_mappings]]`.
+Builds default to CMake's `Release` configuration with `--config Release`. Set `extra_build_args = ["--config", "Debug"]` if a project needs another configuration.
 
 Supported fields:
 
