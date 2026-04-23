@@ -266,6 +266,57 @@ async def test_output_title_follows_visible_output_buffer(
 
 
 @pytest.mark.asyncio
+async def test_output_append_pauses_following_when_scrolled_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test(size=(80, 12)) as pilot:
+        output = app.query_one("#output", OutputLog)
+        for index in range(30):
+            await app.append_output(f"line {index}\n")
+        await pilot.pause()
+        assert output.is_vertical_scroll_end
+
+        output.scroll_home(animate=False)
+        await pilot.pause()
+        scrolled_up_y = output.scroll_y
+
+        await app.append_output("new line\n")
+        await pilot.pause()
+
+        assert output.scroll_y == scrolled_up_y
+        assert not output.is_vertical_scroll_end
+
+
+@pytest.mark.asyncio
+async def test_output_append_follows_when_already_at_bottom(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test(size=(80, 12)) as pilot:
+        output = app.query_one("#output", OutputLog)
+        for index in range(30):
+            await app.append_output(f"line {index}\n")
+        await pilot.pause()
+        assert output.is_vertical_scroll_end
+
+        await app.append_output("new line\n")
+        await pilot.pause()
+
+        assert output.is_vertical_scroll_end
+
+
+@pytest.mark.asyncio
 async def test_output_selection_is_rendered_visibly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

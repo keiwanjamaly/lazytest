@@ -664,7 +664,8 @@ class LazytestApp(App[None]):
     async def append_output(self, text: str, *, key: str = "session") -> None:
         self.output_buffers.setdefault(key, []).append(text)
         if key == self.active_output_key:
-            self.query_one("#output", OutputLog).write(text.rstrip("\n"))
+            output = self.query_one("#output", OutputLog)
+            output.write(text.rstrip("\n"), scroll_end=output.is_vertical_scroll_end)
 
 
 def run() -> None:
