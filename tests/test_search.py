@@ -36,6 +36,27 @@ def test_at_prefix_label_filters_can_be_combined_with_text_search() -> None:
     assert [test.name for test in filter_tests(tests, "math @unit @fast")] == ["math_add"]
 
 
+def test_bang_at_prefix_excludes_matching_labels() -> None:
+    tests = [
+        DiscoveredTest(name="unit_fast", labels=("unit", "fast")),
+        DiscoveredTest(name="unit_slow", labels=("unit", "slow")),
+        DiscoveredTest(name="integration_slow", labels=("integration", "slow")),
+        DiscoveredTest(name="without_labels"),
+    ]
+
+    assert [test.name for test in filter_tests(tests, "!@slow")] == ["unit_fast", "without_labels"]
+
+
+def test_required_and_excluded_label_filters_can_be_combined_with_text_search() -> None:
+    tests = [
+        DiscoveredTest(name="math_add", labels=("unit", "fast")),
+        DiscoveredTest(name="math_slow", labels=("unit", "slow")),
+        DiscoveredTest(name="io_add", labels=("unit", "fast")),
+    ]
+
+    assert [test.name for test in filter_tests(tests, "math @unit !@slow")] == ["math_add"]
+
+
 def test_search_ordering_is_ranked_and_stable() -> None:
     tests = [
         DiscoveredTest(name="abc_extra"),

@@ -16,6 +16,7 @@ class RankedTest:
 class SearchQuery:
     text: str
     labels: tuple[str, ...]
+    excluded_labels: tuple[str, ...]
 
 
 def filter_tests(tests: list[DiscoveredTest], query: str) -> list[DiscoveredTest]:
@@ -25,7 +26,7 @@ def filter_tests(tests: list[DiscoveredTest], query: str) -> list[DiscoveredTest
 
 def rank_tests(tests: list[DiscoveredTest], query: str) -> list[RankedTest]:
     parsed = _parse_query(query)
-    if not parsed.text and not parsed.labels:
+    if not parsed.text and not parsed.labels and not parsed.excluded_labels:
         return [RankedTest(test=test, rank=0, original_index=index) for index, test in enumerate(tests)]
 
     ranked: list[RankedTest] = []
@@ -51,16 +52,23 @@ def preserve_selection(
 def _parse_query(query: str) -> SearchQuery:
     text_parts: list[str] = []
     labels: list[str] = []
+    excluded_labels: list[str] = []
     for part in query.strip().split():
-        if part.startswith("@") and len(part) > 1:
+        if part.startswith("!@") and len(part) > 2:
+            excluded_labels.append(part[2:].casefold())
+        elif part.startswith("@") and len(part) > 1:
             labels.append(part[1:].casefold())
         else:
             text_parts.append(part)
-    return SearchQuery(text=" ".join(text_parts).casefold(), labels=tuple(labels))
+    return SearchQuery(
+        text=" ".join(text_parts).casefold(),
+        labels=tuple(labels),
+        excluded_labels=tuple(excluded_labels),
+    )
 
 
 def _rank(test: DiscoveredTest, query: SearchQuery) -> int | None:
-    if not _matches_labels(test, query.labels):
+    if not _matches_labels(test, query.labels, query.excluded_labels):
         return None
     if not query.text:
         return 3
@@ -85,8 +93,10 @@ def _rank(test: DiscoveredTest, query: SearchQuery) -> int | None:
     return None
 
 
-def _matches_labels(test: DiscoveredTest, labels: tuple[str, ...]) -> bool:
-    if not labels:
-        return True
+def _matches_labels(
+    test: DiscoveredTest, labels: tuple[str, ...], excluded_labels: tuple[str, ...]
+) -> bool:
     test_labels = tuple(label.casefold() for label in test.labels)
-    return all(any(needle in label for label in test_labels) for needle in labels)
+    return all(any(needle in label for label in test_labels) for needle in labels) and not any(
+        needle in label for needle in excluded_labels for label in test_labels
+    )

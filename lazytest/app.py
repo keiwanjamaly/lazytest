@@ -226,7 +226,7 @@ class LazytestApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         yield SearchInput(
-            placeholder="Search tests by name, label, command, or working directory; use @label for tags",
+            placeholder="Search tests by name, label, command, or working directory; use @label and !@label for tags",
             id="search",
         )
         yield Static("Discovering tests...", id="summary")
