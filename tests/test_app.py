@@ -15,6 +15,10 @@ from lazytest.models import DiscoveredTest, ProcessResult, TestStatus as Status
 from lazytest.session import TestSession as Session
 
 
+def test_x_binding_is_removed() -> None:
+    assert all(binding.key != "x" for binding in LazytestApp.BINDINGS)
+
+
 def test_format_test_uses_colored_status_markers() -> None:
     app = LazytestApp(AppConfig())
 
@@ -314,6 +318,7 @@ async def test_output_title_shows_active_process_id(
         app.action_clear_output()
 
         assert output.border_title == "Output"
+        assert output.border_subtitle is None
 
 
 @pytest.mark.asyncio
@@ -342,6 +347,33 @@ async def test_output_title_follows_visible_output_buffer(
         app.clear_output("test:unit.math.subtraction")
 
         assert output.border_title == "Output"
+
+
+@pytest.mark.asyncio
+async def test_output_subtitle_shows_ctrl_c_hint_while_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test():
+        output = app.query_one("#output", OutputLog)
+
+        assert output.border_subtitle is None
+
+        app.show_abort_hint = True
+        app.update_output_chrome()
+
+        assert output.styles.border_subtitle_align == "left"
+        assert output.border_subtitle == "Ctrl+C abort"
+
+        app.show_abort_hint = False
+        app.update_output_chrome()
+
+        assert output.border_subtitle is None
 
 
 @pytest.mark.asyncio

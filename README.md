@@ -115,7 +115,8 @@ If the current directory contains `CTestTestfile.cmake` or `Testing/`, `lazytest
 Keybindings:
 
 - `/`: focus search
-- `Ctrl+U`: clear search
+- `Ctrl+U`: page up in the test list
+- `Ctrl+D`: page down in the test list
 - `Enter`: build and run selected test, or all tests in the selected executable group
 - `f`: rerun failed tests
 - `a`: run filtered tests

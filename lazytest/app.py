@@ -223,6 +223,7 @@ class TestTree(Tree[TestNodeData]):
 
 class LazytestApp(App[None]):
     TITLE = "lazytest"
+    ENABLE_COMMAND_PALETTE = False
 
     CSS = """
     Screen {
@@ -256,7 +257,6 @@ class LazytestApp(App[None]):
 
     BINDINGS = [
         Binding("enter", "run_selected", "Run", key_display="Enter", priority=True),
-        Binding("x", "run_selected", "Run"),
         Binding("ctrl+q", "quit", "Quit"),
         Binding("/", "focus_search", "Search"),
         Binding("ctrl+u", "page_up", "Page up"),
@@ -281,6 +281,7 @@ class LazytestApp(App[None]):
         self.output_buffers: dict[str, list[str]] = {"session": []}
         self.output_titles: dict[str, str] = {"session": "Output"}
         self.active_output_key = "session"
+        self.show_abort_hint = False
         self.test_nodes: dict[str, TreeNode[TestNodeData]] = {}
         self.group_nodes: dict[str, TreeNode[TestNodeData]] = {}
 
@@ -607,6 +608,8 @@ class LazytestApp(App[None]):
             await append_build_output(f"$ cmake --build target {targets[0]} ({reason})\n")
         else:
             await append_build_output(f"$ cmake --build targets {', '.join(targets)}\n")
+        self.show_abort_hint = True
+        self.update_output_chrome()
         try:
             build_result = await build_targets(
                 self.config,
@@ -651,6 +654,9 @@ class LazytestApp(App[None]):
             await self.refresh_test_statuses(cancelled_names)
             await self.append_output("Run aborted.\n")
             raise
+        finally:
+            self.show_abort_hint = False
+            self.update_output_chrome()
 
     def tests_for_names(self, names: list[str]) -> list[DiscoveredTest]:
         tests: list[DiscoveredTest] = []
@@ -676,7 +682,7 @@ class LazytestApp(App[None]):
     def set_output_process_id(self, pid: int, *, key: str = "session") -> None:
         self.output_titles[key] = f"pid {pid}"
         if key == self.active_output_key and self.is_running:
-            self.update_output_title()
+            self.update_output_chrome()
 
     async def refresh_test_status(self, name: str) -> None:
         await self.refresh_test_statuses([name])
@@ -717,13 +723,17 @@ class LazytestApp(App[None]):
     def render_output(self) -> None:
         output = self.query_one("#output", OutputLog)
         output.clear()
-        self.update_output_title()
+        self.update_output_chrome()
         for text in self.output_buffers.get(self.active_output_key, []):
             output.write(text.rstrip("\n"))
 
-    def update_output_title(self) -> None:
+    def update_output_chrome(self) -> None:
+        if not self.is_running:
+            return
         output = self.query_one("#output", OutputLog)
+        output.styles.border_subtitle_align = "left"
         output.border_title = self.output_titles.get(self.active_output_key, "Output")
+        output.border_subtitle = "Ctrl+C abort" if self.show_abort_hint else None
 
     def active_output_text(self) -> str:
         return "".join(self.output_buffers.get(self.active_output_key, []))
