@@ -12,7 +12,7 @@ from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
-from textual.geometry import Offset
+from textual.geometry import Offset, Region
 from textual.selection import Selection
 from textual.strip import Strip
 from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
@@ -138,9 +138,15 @@ class OutputLog(RichLog):
 
 class SearchInput(Input):
     def on_key(self, event: events.Key) -> None:
-        if event.key == "down":
+        if event.key in {"down", "escape"}:
             event.stop()
             self.screen.query_one("#tests", Tree).focus()
+        elif event.key == "ctrl+u":
+            event.stop()
+            self.app.action_page_up()
+        elif event.key == "ctrl+d":
+            event.stop()
+            self.app.action_page_down()
 
 
 class TestTree(Tree[TestNodeData]):
@@ -178,6 +184,12 @@ class TestTree(Tree[TestNodeData]):
         if previous_line != line:
             self._selected_expandable_node_id = None
 
+    def action_page_up(self) -> None:
+        self._move_cursor_by_page(-1)
+
+    def action_page_down(self) -> None:
+        self._move_cursor_by_page(1)
+
     def first_test_line(self) -> int:
         if self.last_line < 0:
             return 0
@@ -187,6 +199,26 @@ class TestTree(Tree[TestNodeData]):
             if isinstance(data, TestNodeData) and data.test_name is not None:
                 return line
         return 0
+
+    def _move_cursor_by_page(self, direction: int) -> None:
+        if self.last_line < 0:
+            return
+        page_size = max(1, self.scrollable_content_region.height - 1)
+        target_line = max(0, min(self.cursor_line + (direction * page_size), self.last_line))
+        node = self.get_node_at_line(target_line)
+        if node is not None:
+            self.move_cursor(node)
+            self._center_cursor_line()
+
+    def _center_cursor_line(self) -> None:
+        self.scroll_to_region(
+            Region(0, self.cursor_line, 1, 1),
+            animate=False,
+            center=True,
+            force=True,
+            immediate=True,
+            x_axis=False,
+        )
 
 
 class LazytestApp(App[None]):
@@ -227,7 +259,8 @@ class LazytestApp(App[None]):
         Binding("x", "run_selected", "Run"),
         Binding("ctrl+q", "quit", "Quit"),
         Binding("/", "focus_search", "Search"),
-        Binding("ctrl+u", "clear_search", "Clear search"),
+        Binding("ctrl+u", "page_up", "Page up"),
+        Binding("ctrl+d", "page_down", "Page down"),
         Binding("f", "run_failed", "Run failed"),
         Binding("a", "run_all", "Run filtered"),
         Binding("ctrl+l", "clear_output", "Clear output"),
@@ -459,8 +492,17 @@ class LazytestApp(App[None]):
     def focus_tests(self) -> None:
         self.query_one("#tests", Tree).focus()
 
-    def action_clear_search(self) -> None:
-        self.query_one("#search", Input).value = ""
+    def action_page_up(self) -> None:
+        tree = self.query_one("#tests", TestTree)
+        if self.focused is not tree:
+            tree.focus()
+        tree.action_page_up()
+
+    def action_page_down(self) -> None:
+        tree = self.query_one("#tests", TestTree)
+        if self.focused is not tree:
+            tree.focus()
+        tree.action_page_down()
 
     def action_clear_output(self) -> None:
         self.clear_output(self.active_output_key)

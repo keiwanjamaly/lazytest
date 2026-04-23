@@ -651,6 +651,81 @@ async def test_search_down_and_enter_focus_tests_without_running(
 
 
 @pytest.mark.asyncio
+async def test_search_escape_focuses_tests_without_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests([DiscoveredTest("unit.math.addition")])
+    requested_names: list[str] = []
+
+    monkeypatch.setattr(app, "run_tests_by_name", requested_names.extend)
+
+    async with app.run_test() as pilot:
+        await app.apply_filter("", None)
+        search = app.query_one("#search", Input)
+        tree = app.query_one("#tests", Tree)
+
+        search.focus()
+        await pilot.press("escape")
+
+        assert app.focused is tree
+        assert requested_names == []
+
+
+@pytest.mark.asyncio
+async def test_ctrl_u_and_ctrl_d_page_the_test_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest(f"unit.test_{index}", command=("/tmp/build/unit_tests",))
+            for index in range(40)
+        ]
+    )
+    centered_regions: list[tuple[int, bool]] = []
+
+    async with app.run_test(size=(80, 12)) as pilot:
+        await app.apply_filter("", None)
+        search = app.query_one("#search", Input)
+        tree = app.query_one("#tests", Tree)
+        tree.move_cursor(app.test_nodes["unit.test_0"])
+
+        original_scroll_to_region = tree.scroll_to_region
+
+        def record_scroll_to_region(region, **kwargs):
+            centered_regions.append((region.y, kwargs.get("center", False)))
+            return original_scroll_to_region(region, **kwargs)
+
+        monkeypatch.setattr(tree, "scroll_to_region", record_scroll_to_region)
+
+        search.focus()
+        await pilot.pause()
+        start_selection = app.selected_test_name()
+
+        await pilot.press("ctrl+d")
+        await pilot.pause()
+        after_page_down_selection = app.selected_test_name()
+
+        await pilot.press("ctrl+u")
+        await pilot.pause()
+
+        assert app.focused is tree
+        assert start_selection == "unit.test_0"
+        assert after_page_down_selection != start_selection
+        assert any(centered for _, centered in centered_regions)
+        assert app.selected_test_name() == start_selection
+
+
+@pytest.mark.asyncio
 async def test_run_tests_by_name_builds_all_required_targets_at_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
