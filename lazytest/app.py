@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
 from textual.widgets.tree import TreeNode
 
 from lazytest.cmake_build import build_targets
+from lazytest.cmake_file_api import ExecutableArtifactIndex, load_executable_artifacts
 from lazytest.config import AppConfig, load_config
 from lazytest.ctest_discovery import discovery_command, parse_ctest_json
 from lazytest.models import DiscoveredTest, TestStatus
@@ -238,6 +240,9 @@ class LazytestApp(App[None]):
         super().__init__()
         self.sync_system_theme()
         self.config = config or load_config(Path.cwd())
+        self.executable_artifacts = ExecutableArtifactIndex()
+        self.executable_identities: dict[str, str] = {}
+        self.executable_basename_counts: dict[str, int] = {}
         self.session = TestSession()
         self.visible_tests: list[DiscoveredTest] = []
         self.output_buffers: dict[str, list[str]] = {"session": []}
@@ -263,7 +268,7 @@ class LazytestApp(App[None]):
 
     async def on_mount(self) -> None:
         self.set_interval(2, self.sync_system_theme)
-        await self.discover()
+        self.run_worker(self.discover(), exclusive=True)
 
     def sync_system_theme(self) -> None:
         theme = system_theme()
@@ -313,6 +318,9 @@ class LazytestApp(App[None]):
         except ValueError as exc:
             await self.append_output(str(exc))
             return
+
+        self.executable_artifacts = load_executable_artifacts(self.config.build_dir, tests)
+        self.cache_executable_identities(tests)
         self.session = TestSession.from_tests(tests)
         await self.apply_filter(self.query_one("#search", Input).value, None)
 
@@ -327,7 +335,8 @@ class LazytestApp(App[None]):
         else:
             selected_node = None
             fallback_node = None
-            for executable, tests in self.group_tests_by_executable(self.visible_tests).items():
+            groups = self.group_tests_by_executable(self.visible_tests)
+            for executable, tests in groups.items():
                 group_node = tree.root.add(
                     self.format_executable_group(executable, tests),
                     data=TestNodeData(executable, output_key=self.executable_output_key(executable)),
@@ -360,12 +369,31 @@ class LazytestApp(App[None]):
         groups: dict[str, list[DiscoveredTest]] = {}
         for test in tests:
             groups.setdefault(self.executable_identity(test), []).append(test)
+        self.executable_basename_counts = Counter(
+            Path(executable).name
+            for executable in groups
+            if executable != UNKNOWN_EXECUTABLE
+        )
         return groups
 
     def executable_identity(self, test: DiscoveredTest) -> str:
+        cached = self.executable_identities.get(test.name)
+        if cached is not None:
+            return cached
+        return self.compute_executable_identity(test)
+
+    def compute_executable_identity(self, test: DiscoveredTest) -> str:
+        artifact = self.executable_artifacts.match_test_command(test, self.config.build_dir)
+        if artifact is not None:
+            return str(artifact.path)
         if test.command and test.command[0]:
             return test.command[0]
         return UNKNOWN_EXECUTABLE
+
+    def cache_executable_identities(self, tests: list[DiscoveredTest]) -> None:
+        self.executable_identities = {
+            test.name: self.compute_executable_identity(test) for test in tests
+        }
 
     def executable_label(self, test: DiscoveredTest) -> str:
         return self.executable_display(self.executable_identity(test))
@@ -374,13 +402,7 @@ class LazytestApp(App[None]):
         if executable == UNKNOWN_EXECUTABLE:
             return executable
         label = Path(executable).name
-        matching_identities = {
-            identity
-            for test in self.visible_tests
-            if (identity := self.executable_identity(test)) != UNKNOWN_EXECUTABLE
-            and Path(identity).name == label
-        }
-        if len(matching_identities) > 1:
+        if self.executable_basename_counts.get(label, 0) > 1:
             return executable
         return label
 
@@ -488,7 +510,7 @@ class LazytestApp(App[None]):
         tests_by_target: dict[str, tuple[str, list[DiscoveredTest]]] = {}
         for test in tests:
             self.clear_output(self.test_output_key(test.name))
-            resolution = resolve_target(test, self.config)
+            resolution = resolve_target(test, self.config, self.executable_artifacts)
             if not resolution.target:
                 await self.append_output(
                     f"{resolution.reason}\n",

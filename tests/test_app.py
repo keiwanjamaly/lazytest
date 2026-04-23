@@ -1,13 +1,15 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 from rich.text import Text
 from textual import events
 from textual.geometry import Offset
 from textual.selection import Selection
-from textual.widgets import Input, Tree
+from textual.widgets import Input, Static, Tree
 
 from lazytest.app import LazytestApp, OutputLog
+from lazytest.cmake_file_api import ExecutableArtifact, ExecutableArtifactIndex
 from lazytest.config import AppConfig
 from lazytest.models import DiscoveredTest, ProcessResult, TestStatus as Status
 from lazytest.session import TestSession as Session
@@ -65,6 +67,59 @@ def test_group_tests_by_executable_keeps_same_basenames_separate() -> None:
     assert [test.name for test in groups["/tmp/debug/check"]] == ["a"]
     assert [test.name for test in groups["/tmp/release/check"]] == ["b"]
     assert app.executable_display("/tmp/debug/check") == "/tmp/debug/check"
+
+
+def test_group_tests_by_executable_uses_file_api_artifact_for_wrapper() -> None:
+    build_dir = Path("/tmp/build")
+    app = LazytestApp(AppConfig(build_dir=build_dir))
+    app.executable_artifacts = ExecutableArtifactIndex(
+        (
+            ExecutableArtifact(
+                path=build_dir / "test-wrapper-case",
+                target="test-wrapper-case",
+                file_name="test-wrapper-case",
+            ),
+        )
+    )
+    tests = [
+        DiscoveredTest(
+            "wrapper",
+            command=("bash", "-c", "make test-wrapper-case && /tmp/build/test-wrapper-case"),
+            working_directory=build_dir,
+        ),
+    ]
+    app.visible_tests = tests
+
+    groups = app.group_tests_by_executable(tests)
+
+    assert list(groups) == ["/tmp/build/test-wrapper-case"]
+    assert app.executable_label(tests[0]) == "test-wrapper-case"
+
+
+def test_group_formatting_reuses_cached_executable_identities() -> None:
+    class CountingArtifacts:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def match_test_command(self, test: DiscoveredTest, build_dir: Path):
+            self.calls += 1
+            return None
+
+    artifacts = CountingArtifacts()
+    app = LazytestApp(AppConfig(build_dir=Path("/tmp/build")))
+    app.executable_artifacts = artifacts
+    tests = [
+        DiscoveredTest(f"test.{index}", command=(f"/tmp/build/test_{index}",))
+        for index in range(20)
+    ]
+
+    app.cache_executable_identities(tests)
+    app.visible_tests = tests
+    groups = app.group_tests_by_executable(tests)
+    for executable, group_tests in groups.items():
+        app.format_executable_group(executable, group_tests)
+
+    assert artifacts.calls == len(tests)
 
 
 def test_group_status_reports_cancelled_tests() -> None:
@@ -213,6 +268,30 @@ def test_app_uses_system_theme(monkeypatch: pytest.MonkeyPatch) -> None:
     app = LazytestApp(AppConfig())
 
     assert app.theme == "textual-light"
+
+
+@pytest.mark.asyncio
+async def test_startup_paints_before_discovery_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def slow_discover(self: LazytestApp) -> None:
+        started.set()
+        await finish.wait()
+
+    monkeypatch.setattr(LazytestApp, "discover", slow_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test() as pilot:
+        await started.wait()
+        await pilot.pause()
+
+        assert str(app.query_one("#summary", Static).render()) == "Discovering tests..."
+
+        finish.set()
+        await pilot.pause()
 
 
 @pytest.mark.asyncio
@@ -575,7 +654,22 @@ async def test_search_down_and_enter_focus_tests_without_running(
 async def test_run_tests_by_name_builds_all_required_targets_at_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = LazytestApp(AppConfig())
+    build_dir = Path("/tmp/build")
+    app = LazytestApp(AppConfig(build_dir=build_dir))
+    app.executable_artifacts = ExecutableArtifactIndex(
+        (
+            ExecutableArtifact(
+                path=build_dir / "unit_tests",
+                target="unit_tests",
+                file_name="unit_tests",
+            ),
+            ExecutableArtifact(
+                path=build_dir / "integration_tests",
+                target="integration_tests",
+                file_name="integration_tests",
+            ),
+        )
+    )
     app.session = Session.from_tests(
         [
             DiscoveredTest("unit.math.addition", command=("/tmp/build/unit_tests",)),
