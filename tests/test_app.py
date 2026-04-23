@@ -343,6 +343,36 @@ async def test_output_selection_is_rendered_visibly(
 
 
 @pytest.mark.asyncio
+async def test_output_multiline_selection_is_rendered_visibly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+
+    async with app.run_test(size=(100, 30)):
+        output = app.query_one("#output", OutputLog)
+        output.write("first line")
+        output.write("middle line")
+        output.write("last line")
+        app.screen.selections = {
+            output: Selection(Offset(2, 0), Offset(4, 2)),
+        }
+
+        first = output.render_line(0)
+        middle = output.render_line(1)
+        last = output.render_line(2)
+
+        assert "reverse" not in str(first.crop(0, 2)._segments[0].style)
+        assert "reverse" in str(first.crop(2, 10)._segments[0].style)
+        assert "reverse" in str(middle.crop(0, 11)._segments[0].style)
+        assert "reverse" in str(last.crop(0, 4)._segments[0].style)
+        assert "reverse" not in str(last.crop(4, 9)._segments[0].style)
+
+
+@pytest.mark.asyncio
 async def test_output_selection_copies_text_and_clears_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -360,12 +390,12 @@ async def test_output_selection_copies_text_and_clears_selection(
         output.write("first line")
         output.write("second line")
         app.screen.selections = {
-            output: Selection(Offset(0, 0), Offset(5, 0)),
+            output: Selection(Offset(0, 0), Offset(6, 1)),
         }
 
         app.on_text_selected(events.TextSelected())
 
-        assert copied == ["first"]
+        assert copied == ["first line\nsecond"]
         assert app.screen.selections == {}
 
 

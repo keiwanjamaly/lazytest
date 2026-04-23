@@ -70,9 +70,12 @@ class OutputLog(RichLog):
         selection = self.screen.selections.get(self)
         if selection is None:
             return line
-        start, end = selection.get_span(y + self.scroll_offset.y) or (0, 0)
+        line_index = y + self.scroll_offset.y
+        start, end = selection.get_span(line_index) or (0, 0)
         if start == end:
             return line
+        if end == -1:
+            end = len(self.lines[line_index].text.rstrip())
         start -= self.scroll_offset.x
         end -= self.scroll_offset.x
         return Strip.join(
