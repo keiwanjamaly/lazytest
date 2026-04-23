@@ -2,6 +2,18 @@
 
 `lazytest` is a standalone terminal UI for CMake/CTest projects, especially C++ projects that register Catch2 tests with CTest. It discovers tests from CTest JSON, groups tests by executable, lets you filter by metadata, builds the configured owning target, then runs the selected test while streaming output.
 
+Install with `uv`:
+
+```bash
+uv tool install git+https://github.com/keiwanjamaly/lazytest@main
+```
+
+Upgrade later with:
+
+```bash
+uv tool upgrade lazytest
+```
+
 ## Design
 
 The application is split so the UI stays focused:
