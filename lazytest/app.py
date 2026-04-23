@@ -145,6 +145,14 @@ class TestTree(Tree[TestNodeData]):
             return
         super().action_cursor_up()
 
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "j":
+            event.stop()
+            self.action_cursor_down()
+        elif event.key == "k":
+            event.stop()
+            self.action_cursor_up()
+
     def first_test_line(self) -> int:
         if self.last_line < 0:
             return 0

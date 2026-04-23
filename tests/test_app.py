@@ -376,6 +376,60 @@ async def test_arrow_up_from_first_test_focuses_search(
 
 
 @pytest.mark.asyncio
+async def test_vim_keys_move_test_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition", command=("/tmp/build/unit_tests",)),
+            DiscoveredTest("unit.math.subtraction", command=("/tmp/build/unit_tests",)),
+        ]
+    )
+
+    async with app.run_test() as pilot:
+        await app.apply_filter("", None)
+        tree = app.query_one("#tests", Tree)
+        tree.focus()
+        await pilot.pause()
+
+        await pilot.press("j")
+        assert app.selected_test_name() == "unit.math.addition"
+
+        await pilot.press("j")
+        assert app.selected_test_name() == "unit.math.subtraction"
+
+        await pilot.press("k")
+        assert app.selected_test_name() == "unit.math.addition"
+
+
+@pytest.mark.asyncio
+async def test_k_from_first_test_focuses_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests([DiscoveredTest("unit.math.addition")])
+
+    async with app.run_test() as pilot:
+        await app.apply_filter("", None)
+        tree = app.query_one("#tests", Tree)
+        tree.focus()
+        await pilot.pause()
+
+        await pilot.press("k")
+
+        assert app.focused is app.query_one("#search", Input)
+
+
+@pytest.mark.asyncio
 async def test_search_down_and_enter_focus_tests_without_running(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
