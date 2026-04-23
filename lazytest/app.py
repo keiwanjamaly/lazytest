@@ -139,6 +139,11 @@ class SearchInput(Input):
 
 
 class TestTree(Tree[TestNodeData]):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.auto_expand = False
+        self._selected_expandable_node_id: int | None = None
+
     def action_cursor_up(self) -> None:
         if self.cursor_line <= self.first_test_line():
             self.screen.query_one("#search", Input).focus()
@@ -152,6 +157,21 @@ class TestTree(Tree[TestNodeData]):
         elif event.key == "k":
             event.stop()
             self.action_cursor_up()
+
+    def action_select_cursor(self) -> None:
+        node = self.cursor_node
+        if node is None:
+            return
+        if node.allow_expand and self._selected_expandable_node_id == id(node):
+            self._toggle_node(node)
+            return
+        self._selected_expandable_node_id = id(node) if node.allow_expand else None
+        self.post_message(Tree.NodeSelected(node))
+
+    def watch_cursor_line(self, previous_line: int, line: int) -> None:
+        super().watch_cursor_line(previous_line, line)
+        if previous_line != line:
+            self._selected_expandable_node_id = None
 
     def first_test_line(self) -> int:
         if self.last_line < 0:

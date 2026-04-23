@@ -349,6 +349,38 @@ async def test_output_mouse_drag_copies_text_and_clears_selection(
 
 
 @pytest.mark.asyncio
+async def test_group_selects_before_toggling_expansion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition", command=("/tmp/build/unit_tests",)),
+            DiscoveredTest("unit.math.subtraction", command=("/tmp/build/unit_tests",)),
+        ]
+    )
+
+    async with app.run_test():
+        await app.apply_filter("", None)
+        tree = app.query_one("#tests", Tree)
+        group_node = app.group_nodes["/tmp/build/unit_tests"]
+        tree.move_cursor(group_node)
+
+        tree.action_select_cursor()
+        assert group_node.is_expanded
+
+        tree.action_select_cursor()
+        assert not group_node.is_expanded
+
+        tree.action_select_cursor()
+        assert group_node.is_expanded
+
+
+@pytest.mark.asyncio
 async def test_arrow_up_from_first_test_focuses_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
