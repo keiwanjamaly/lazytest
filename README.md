@@ -124,7 +124,7 @@ Keybindings:
 - `c`: copy current output buffer
 - `Ctrl+C`: abort active build or test work
 - `r`: rediscover tests
-- `Ctrl+Q`: quit
+- `q`: quit
 
 Search text matches test names, labels, commands, working directories, and metadata. Prefix a term with `@` to require a matching CTest label, for example `@unit` or `math @unit @fast`.
 

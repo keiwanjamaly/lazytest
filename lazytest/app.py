@@ -257,7 +257,7 @@ class LazytestApp(App[None]):
 
     BINDINGS = [
         Binding("enter", "run_selected", "Run", key_display="Enter", priority=True),
-        Binding("ctrl+q", "quit", "Quit"),
+        Binding("q", "quit", "Quit"),
         Binding("/", "focus_search", "Search"),
         Binding("ctrl+u", "page_up", "Page up"),
         Binding("ctrl+d", "page_down", "Page down"),

@@ -19,6 +19,14 @@ def test_x_binding_is_removed() -> None:
     assert all(binding.key != "x" for binding in LazytestApp.BINDINGS)
 
 
+def test_quit_binding_uses_q_instead_of_ctrl_q() -> None:
+    quit_bindings = [binding for binding in LazytestApp.BINDINGS if binding.action == "quit"]
+
+    assert len(quit_bindings) == 1
+    assert quit_bindings[0].key == "q"
+    assert all(binding.key != "ctrl+q" for binding in LazytestApp.BINDINGS)
+
+
 def test_format_test_uses_colored_status_markers() -> None:
     app = LazytestApp(AppConfig())
 
