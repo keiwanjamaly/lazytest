@@ -9,13 +9,13 @@ from pathlib import Path
 from rich.markup import escape
 from rich.style import Style
 from textual import events, on, work
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.geometry import Offset, Region
 from textual.selection import Selection
 from textual.strip import Strip
-from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
+from textual.widgets import Footer, Header, Input, RichLog, Tree
 from textual.widgets.tree import TreeNode
 
 from lazytest.cmake_build import build_targets
@@ -42,6 +42,18 @@ class TestNodeData:
     executable: str
     test_name: str | None = None
     output_key: str = "session"
+
+
+@dataclass(frozen=True)
+class RunBatchState:
+    test_names: tuple[str, ...] = ()
+    queued: frozenset[str] = frozenset()
+    running: frozenset[str] = frozenset()
+
+    @classmethod
+    def from_test_names(cls, test_names: list[str]) -> "RunBatchState":
+        names = tuple(test_names)
+        return cls(test_names=names, queued=frozenset(names), running=frozenset())
 
 
 STATUS_DISPLAYS = {
@@ -235,11 +247,6 @@ class LazytestApp(App[None]):
         height: 3;
     }
 
-    #summary {
-        height: 1;
-        padding-left: 1;
-    }
-
     #main {
         height: 1fr;
     }
@@ -284,6 +291,8 @@ class LazytestApp(App[None]):
         self.show_abort_hint = False
         self.test_nodes: dict[str, TreeNode[TestNodeData]] = {}
         self.group_nodes: dict[str, TreeNode[TestNodeData]] = {}
+        self.is_discovering = True
+        self.run_batch = RunBatchState()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -291,7 +300,6 @@ class LazytestApp(App[None]):
             placeholder="Search tests by name, label, command, or working directory; use @label and !@label for tags",
             id="search",
         )
-        yield Static("Discovering tests...", id="summary")
         with Vertical(id="main"):
             with Vertical(id="left"):
                 tree: Tree[TestNodeData] = TestTree("Tests", id="tests")
@@ -301,6 +309,7 @@ class LazytestApp(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
+        self.update_tests_pane_chrome()
         self.set_interval(2, self.sync_system_theme)
         self.run_worker(self.discover(), exclusive=True)
 
@@ -341,21 +350,29 @@ class LazytestApp(App[None]):
         self.screen.clear_selection()
 
     async def discover(self) -> None:
+        self.is_discovering = True
+        self.run_batch = RunBatchState()
+        self.update_tests_pane_chrome()
         await self.append_output(f"$ {' '.join(discovery_command(self.config))}")
         result = await collect_command(discovery_command(self.config))
         if not result.ok:
             await self.append_output(result.output)
             await self.append_output(f"CTest discovery failed with exit code {result.returncode}")
+            self.is_discovering = False
+            self.update_tests_pane_chrome()
             return
         try:
             tests = parse_ctest_json(result.output)
         except ValueError as exc:
             await self.append_output(str(exc))
+            self.is_discovering = False
+            self.update_tests_pane_chrome()
             return
 
         self.executable_artifacts = load_executable_artifacts(self.config.build_dir, tests)
         self.cache_executable_identities(tests)
         self.session = TestSession.from_tests(tests)
+        self.is_discovering = False
         await self.apply_filter(self.query_one("#search", Input).value, None)
 
     async def apply_filter(self, query: str, selected_name: str | None) -> None:
@@ -394,8 +411,7 @@ class LazytestApp(App[None]):
             index = preserve_selection(selected_name, self.visible_tests)
             if index is not None:
                 tree.move_cursor(selected_node or fallback_node)
-        summary = self.query_one("#summary", Static)
-        summary.update(f"{len(self.visible_tests)} visible / {len(self.session.tests)} total")
+        self.update_tests_pane_chrome()
 
     def group_tests_by_executable(
         self, tests: list[DiscoveredTest]
@@ -527,6 +543,7 @@ class LazytestApp(App[None]):
         self.notify("No active build or test run.", severity="warning")
 
     def action_refresh(self) -> None:
+        self.run_batch = RunBatchState()
         self.run_worker(self.discover(), exclusive=True)
 
     def action_run_selected(self) -> None:
@@ -580,6 +597,10 @@ class LazytestApp(App[None]):
             for _, target_tests in tests_by_target.values()
             for test in target_tests
         ]
+        self.run_batch = RunBatchState.from_test_names(
+            [test.name for test in all_target_tests]
+        )
+        self.update_tests_pane_chrome()
         group_keys = list(
             dict.fromkeys(
                 self.executable_output_key(self.executable_identity(test))
@@ -602,10 +623,6 @@ class LazytestApp(App[None]):
                 self.set_output_process_id(pid, key=group_key)
             await append_build_output(f"process id: {pid}\n")
 
-        for test in all_target_tests:
-            self.session.set_status(test.name, TestStatus.RUNNING)
-        await self.refresh_test_statuses([test.name for test in all_target_tests])
-
         if len(targets) == 1:
             reason = tests_by_target[targets[0]][0]
             await append_build_output(f"$ cmake --build target {targets[0]} ({reason})\n")
@@ -623,11 +640,17 @@ class LazytestApp(App[None]):
             if not build_result.ok:
                 for test in all_target_tests:
                     self.session.set_status(test.name, TestStatus.FAILED)
+                self.run_batch = RunBatchState(
+                    test_names=self.run_batch.test_names,
+                    queued=frozenset(),
+                    running=frozenset(),
+                )
                 await self.refresh_test_statuses([test.name for test in all_target_tests])
                 return
 
             for _, target_tests in tests_by_target.values():
                 for test in target_tests:
+                    self.mark_test_started(test.name)
                     test_key = self.test_output_key(test.name)
                     self.show_output(test_key)
                     await self.append_output(f"$ {self.test_run_label(test)}\n", key=test_key)
@@ -644,16 +667,26 @@ class LazytestApp(App[None]):
                         test.name,
                         TestStatus.PASSED if test_result.ok else TestStatus.FAILED,
                     )
+                    self.mark_test_finished(test.name)
                     await self.refresh_test_status(test.name)
                     await asyncio.sleep(0)
         except asyncio.CancelledError:
             cancelled_names = [
                 test.name
                 for test in all_target_tests
-                if self.session.tests_by_name[test.name].status is TestStatus.RUNNING
+                if self.session.tests_by_name[test.name].status not in {
+                    TestStatus.PASSED,
+                    TestStatus.FAILED,
+                    TestStatus.CANCELLED,
+                }
             ]
             for name in cancelled_names:
                 self.session.set_status(name, TestStatus.CANCELLED)
+            self.run_batch = RunBatchState(
+                test_names=self.run_batch.test_names,
+                queued=frozenset(),
+                running=frozenset(),
+            )
             await self.refresh_test_statuses(cancelled_names)
             await self.append_output("Run aborted.\n")
             raise
@@ -710,6 +743,66 @@ class LazytestApp(App[None]):
                 if self.executable_identity(test) == executable
             ]
             node.set_label(self.format_executable_group(executable, tests))
+        self.update_tests_pane_chrome()
+
+    def mark_test_started(self, name: str) -> None:
+        self.session.set_status(name, TestStatus.RUNNING)
+        self.run_batch = RunBatchState(
+            test_names=self.run_batch.test_names,
+            queued=self.run_batch.queued - {name},
+            running=self.run_batch.running | {name},
+        )
+        self.update_tests_pane_chrome()
+
+    def mark_test_finished(self, name: str) -> None:
+        self.run_batch = RunBatchState(
+            test_names=self.run_batch.test_names,
+            queued=self.run_batch.queued,
+            running=self.run_batch.running - {name},
+        )
+        self.update_tests_pane_chrome()
+
+    def update_tests_pane_chrome(self) -> None:
+        if not self.is_mounted:
+            return
+        try:
+            left = self.query_one("#left", Vertical)
+        except ScreenStackError:
+            return
+        left.styles.border_title_align = "left"
+        left.styles.border_subtitle_align = "left"
+        left.border_title = (
+            f"Tests {len(self.visible_tests)} visible / {len(self.session.tests)} total"
+        )
+        left.border_subtitle = self.tests_pane_subtitle()
+
+    def tests_pane_subtitle(self) -> str | None:
+        if self.is_discovering:
+            return "Discovering tests..."
+        if not self.run_batch.test_names:
+            return None
+
+        tests = [
+            self.session.tests_by_name[name]
+            for name in self.run_batch.test_names
+            if name in self.session.tests_by_name
+        ]
+        counts = {
+            "running": len(self.run_batch.running),
+            "passed": sum(test.status is TestStatus.PASSED for test in tests),
+            "failed": sum(test.status is TestStatus.FAILED for test in tests),
+            "queued": len(self.run_batch.queued),
+            "cancelled": sum(test.status is TestStatus.CANCELLED for test in tests),
+        }
+        parts = [
+            f"running {counts['running']}",
+            f"passed {counts['passed']}",
+            f"failed {counts['failed']}",
+            f"queued {counts['queued']}",
+        ]
+        if counts["cancelled"]:
+            parts.append(f"cancelled {counts['cancelled']}")
+        return "  ".join(parts)
 
     def clear_output(self, key: str) -> None:
         self.output_buffers[key] = []

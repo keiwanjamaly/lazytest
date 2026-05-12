@@ -4,9 +4,10 @@ from pathlib import Path
 import pytest
 from rich.text import Text
 from textual import events
+from textual.containers import Vertical
 from textual.geometry import Offset
 from textual.selection import Selection
-from textual.widgets import Input, Static, Tree
+from textual.widgets import Input, Tree
 
 from lazytest.app import LazytestApp, OutputLog
 from lazytest.cmake_file_api import ExecutableArtifact, ExecutableArtifactIndex
@@ -210,8 +211,6 @@ async def test_run_tests_by_name_builds_target_once_and_runs_tests_separately(
         "test:unit.math.subtraction",
     ]
     assert refreshed_statuses == [
-        Status.RUNNING,
-        Status.RUNNING,
         Status.PASSED,
         Status.PASSED,
     ]
@@ -322,7 +321,9 @@ async def test_startup_paints_before_discovery_finishes(
         await started.wait()
         await pilot.pause()
 
-        assert str(app.query_one("#summary", Static).render()) == "Discovering tests..."
+        left = app.query_one("#left", Vertical)
+        assert left.border_title == "Tests 0 visible / 0 total"
+        assert left.border_subtitle == "Discovering tests..."
 
         finish.set()
         await pilot.pause()
@@ -926,3 +927,94 @@ async def test_refresh_test_status_updates_tree_labels_without_rebuilding(
         assert clear_calls == 0
         assert app.test_nodes["unit.math.addition"].label.plain == "⟳ unit.math.addition"
         assert app.group_nodes["/tmp/build/unit_tests"].label.plain == "⟳ unit_tests (2)"
+
+
+@pytest.mark.asyncio
+async def test_tests_pane_title_shows_visible_and_total_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition", labels=("unit",)),
+            DiscoveredTest("integration.api.health", labels=("integration",)),
+        ]
+    )
+
+    async with app.run_test():
+        app.is_discovering = False
+        await app.apply_filter("@unit", None)
+
+        left = app.query_one("#left", Vertical)
+        assert left.border_title == "Tests 1 visible / 2 total"
+        assert left.border_subtitle is None
+
+
+@pytest.mark.asyncio
+async def test_tests_pane_subtitle_tracks_current_run_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition"),
+            DiscoveredTest("unit.math.subtraction"),
+        ]
+    )
+
+    async with app.run_test():
+        app.is_discovering = False
+        await app.apply_filter("", None)
+        left = app.query_one("#left", Vertical)
+
+        app.run_batch = app.run_batch.from_test_names(
+            ["unit.math.addition", "unit.math.subtraction"]
+        )
+        app.update_tests_pane_chrome()
+        assert left.border_subtitle == "running 0  passed 0  failed 0  queued 2"
+
+        app.mark_test_started("unit.math.addition")
+        assert left.border_subtitle == "running 1  passed 0  failed 0  queued 1"
+
+        app.session.set_status("unit.math.addition", Status.PASSED)
+        app.mark_test_finished("unit.math.addition")
+        assert left.border_subtitle == "running 0  passed 1  failed 0  queued 1"
+
+        app.mark_test_started("unit.math.subtraction")
+        app.session.set_status("unit.math.subtraction", Status.FAILED)
+        app.mark_test_finished("unit.math.subtraction")
+        assert left.border_subtitle == "running 0  passed 1  failed 1  queued 0"
+
+
+@pytest.mark.asyncio
+async def test_tests_pane_subtitle_includes_cancelled_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig())
+    app.session = Session.from_tests([DiscoveredTest("unit.math.addition")])
+
+    async with app.run_test():
+        app.is_discovering = False
+        await app.apply_filter("", None)
+        left = app.query_one("#left", Vertical)
+
+        app.run_batch = app.run_batch.from_test_names(["unit.math.addition"])
+        app.session.set_status("unit.math.addition", Status.CANCELLED)
+        app.update_tests_pane_chrome()
+
+        assert (
+            left.border_subtitle
+            == "running 0  passed 0  failed 0  queued 1  cancelled 1"
+        )
