@@ -34,8 +34,14 @@ def test_format_test_uses_colored_status_markers() -> None:
     assert app.format_test(DiscoveredTest("not.run")) == "[dim]○ not.run[/]"
     assert app.format_test(DiscoveredTest("active", status=Status.RUNNING)) == "[yellow]⟳ active[/]"
     assert app.format_test(DiscoveredTest("stopped", status=Status.CANCELLED)) == "[yellow]■ stopped[/]"
-    assert app.format_test(DiscoveredTest("ok", status=Status.PASSED)) == "[green]✓ ok[/]"
-    assert app.format_test(DiscoveredTest("bad", status=Status.FAILED)) == "[red]✗ bad[/]"
+    assert (
+        app.format_test(DiscoveredTest("ok", status=Status.PASSED, duration_seconds=1.25))
+        == "[green]✓ ok (1.25s)[/]"
+    )
+    assert (
+        app.format_test(DiscoveredTest("bad", status=Status.FAILED, duration_seconds=0.5))
+        == "[red]✗ bad (0.50s)[/]"
+    )
 
 
 def test_format_test_escapes_markup_in_test_names_and_labels() -> None:
@@ -45,10 +51,11 @@ def test_format_test_escapes_markup_in_test_names_and_labels() -> None:
             "case[brackets]",
             labels=("unit[fast]",),
             status=Status.PASSED,
+            duration_seconds=0.25,
         )
     )
 
-    assert Text.from_markup(formatted).plain == "✓ case[brackets] [unit[fast]]"
+    assert Text.from_markup(formatted).plain == "✓ case[brackets] [unit[fast]] (0.25s)"
 
 
 def test_group_tests_by_executable_uses_ctest_command_executable() -> None:
@@ -890,6 +897,45 @@ async def test_cancelling_run_marks_running_tests_cancelled(
     assert app.session.tests_by_name["unit.math.addition"].status is Status.CANCELLED
     assert app.session.tests_by_name["unit.math.subtraction"].status is Status.CANCELLED
     assert output[-1] == "Run aborted.\n"
+
+
+@pytest.mark.asyncio
+async def test_run_records_test_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = LazytestApp(AppConfig(default_build_target="unit_tests"))
+    app.session = Session.from_tests([DiscoveredTest("unit.math.addition")])
+
+    async def fake_refresh_test_statuses(names: list[str]) -> None:
+        return None
+
+    async def fake_refresh_test_status(name: str) -> None:
+        return None
+
+    async def fake_build_targets(config, targets, on_output, on_start=None):
+        return ProcessResult(command=("cmake",), returncode=0)
+
+    async def fake_run_test(config, test, on_output, on_start=None):
+        return ProcessResult(command=("ctest",), returncode=0)
+
+    async def fake_append_output(text: str, *, key: str = "session") -> None:
+        return None
+
+    time_points = iter([10.0, 10.125])
+
+    monkeypatch.setattr(app, "refresh_test_statuses", fake_refresh_test_statuses)
+    monkeypatch.setattr(app, "refresh_test_status", fake_refresh_test_status)
+    monkeypatch.setattr(app, "show_output", lambda key: None)
+    monkeypatch.setattr(app, "append_output", fake_append_output)
+    monkeypatch.setattr("lazytest.app.build_targets", fake_build_targets)
+    monkeypatch.setattr("lazytest.app.run_test", fake_run_test)
+    monkeypatch.setattr("lazytest.app.time.perf_counter", lambda: next(time_points))
+
+    await app._run_tests_by_name(["unit.math.addition"])
+
+    test = app.session.tests_by_name["unit.math.addition"]
+    assert test.status is Status.PASSED
+    assert test.duration_seconds == pytest.approx(0.125)
 
 
 @pytest.mark.asyncio

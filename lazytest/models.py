@@ -21,9 +21,13 @@ class DiscoveredTest:
     labels: tuple[str, ...] = ()
     metadata: dict[str, str] = field(default_factory=dict)
     status: TestStatus = TestStatus.UNKNOWN
+    duration_seconds: float | None = None
 
     def with_status(self, status: TestStatus) -> "DiscoveredTest":
         return replace(self, status=status)
+
+    def with_duration(self, duration_seconds: float | None) -> "DiscoveredTest":
+        return replace(self, duration_seconds=duration_seconds)
 
 
 @dataclass(frozen=True)

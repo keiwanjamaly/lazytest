@@ -21,5 +21,9 @@ class TestSession:
         test = self.tests_by_name[test_name]
         self.tests_by_name[test_name] = test.with_status(status)
 
+    def set_duration(self, test_name: str, duration_seconds: float | None) -> None:
+        test = self.tests_by_name[test_name]
+        self.tests_by_name[test_name] = test.with_duration(duration_seconds)
+
     def failed_tests(self) -> list[DiscoveredTest]:
         return [test for test in self.tests if test.status is TestStatus.FAILED]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -487,7 +488,13 @@ class LazytestApp(App[None]):
         display = STATUS_DISPLAYS[test.status]
         label_text = f"[{', '.join(test.labels)}]" if test.labels else ""
         labels = f" {escape(label_text)}" if label_text else ""
-        return f"[{display.style}]{display.marker} {escape(test.name)}{labels}[/]"
+        duration = self.format_test_duration(test)
+        return f"[{display.style}]{display.marker} {escape(test.name)}{labels}{duration}[/]"
+
+    def format_test_duration(self, test: DiscoveredTest) -> str:
+        if test.duration_seconds is None:
+            return ""
+        return f" ({test.duration_seconds:.2f}s)"
 
     def selected_test_name(self) -> str | None:
         names = self.selected_test_names()
@@ -654,6 +661,7 @@ class LazytestApp(App[None]):
                     test_key = self.test_output_key(test.name)
                     self.show_output(test_key)
                     await self.append_output(f"$ {self.test_run_label(test)}\n", key=test_key)
+                    started_at = time.perf_counter()
                     test_result = await run_test(
                         self.config,
                         test,
@@ -663,10 +671,12 @@ class LazytestApp(App[None]):
                             key=key,
                         ),
                     )
+                    duration_seconds = time.perf_counter() - started_at
                     self.session.set_status(
                         test.name,
                         TestStatus.PASSED if test_result.ok else TestStatus.FAILED,
                     )
+                    self.session.set_duration(test.name, duration_seconds)
                     self.mark_test_finished(test.name)
                     await self.refresh_test_status(test.name)
                     await asyncio.sleep(0)
@@ -747,6 +757,7 @@ class LazytestApp(App[None]):
 
     def mark_test_started(self, name: str) -> None:
         self.session.set_status(name, TestStatus.RUNNING)
+        self.session.set_duration(name, None)
         self.run_batch = RunBatchState(
             test_names=self.run_batch.test_names,
             queued=self.run_batch.queued - {name},

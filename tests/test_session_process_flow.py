@@ -14,9 +14,11 @@ def test_session_status_transitions() -> None:
 
     assert session.tests_by_name["unit.math"].status is Status.UNKNOWN
     session.set_status("unit.math", Status.RUNNING)
+    session.set_duration("unit.math", 0.5)
     session.set_status("unit.math", Status.PASSED)
 
     assert session.tests_by_name["unit.math"].status is Status.PASSED
+    assert session.tests_by_name["unit.math"].duration_seconds == 0.5
 
 
 @pytest.mark.asyncio
@@ -106,4 +108,3 @@ async def test_process_reports_pid_on_start() -> None:
 
     assert result.ok
     assert pids == [int("".join(output).strip())]
-
