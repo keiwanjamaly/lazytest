@@ -294,6 +294,7 @@ class LazytestApp(App[None]):
         self.group_nodes: dict[str, TreeNode[TestNodeData]] = {}
         self.is_discovering = True
         self.run_batch = RunBatchState()
+        self.applied_search_query = ""
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -321,6 +322,8 @@ class LazytestApp(App[None]):
 
     @on(Input.Changed, "#search")
     async def on_search_changed(self, event: Input.Changed) -> None:
+        if event.value == self.applied_search_query:
+            return
         selected = self.selected_test_name()
         await self.apply_filter(event.value, selected)
 
@@ -377,8 +380,9 @@ class LazytestApp(App[None]):
         await self.apply_filter(self.query_one("#search", Input).value, None)
 
     async def apply_filter(self, query: str, selected_name: str | None) -> None:
+        self.applied_search_query = query
         self.visible_tests = filter_tests(self.session.tests, query)
-        tree = self.query_one("#tests", Tree)
+        tree = self.query_one("#tests", TestTree)
         tree.clear()
         self.test_nodes.clear()
         self.group_nodes.clear()
@@ -413,6 +417,37 @@ class LazytestApp(App[None]):
             if index is not None:
                 tree.move_cursor(selected_node or fallback_node)
         self.update_tests_pane_chrome()
+
+    async def prepare_test_overview_for_run(self, tests: list[DiscoveredTest]) -> None:
+        if not self.is_mounted:
+            return
+        selected_name = tests[0].name if tests else None
+        try:
+            search = self.query_one("#search", Input)
+        except ScreenStackError:
+            return
+        if search.value:
+            search.value = ""
+        await self.apply_filter("", selected_name)
+        if selected_name is not None:
+            self.follow_test_in_overview(selected_name)
+
+    def follow_test_in_overview(self, name: str) -> None:
+        if not self.is_mounted:
+            return
+        try:
+            tree = self.query_one("#tests", TestTree)
+        except ScreenStackError:
+            return
+        node = self.test_nodes.get(name)
+        if node is None:
+            return
+        parent = node.parent
+        if parent is not None and parent.allow_expand and parent.is_collapsed:
+            parent.expand()
+        tree.focus()
+        tree.move_cursor(node)
+        tree._center_cursor_line()
 
     def group_tests_by_executable(
         self, tests: list[DiscoveredTest]
@@ -607,6 +642,7 @@ class LazytestApp(App[None]):
         self.run_batch = RunBatchState.from_test_names(
             [test.name for test in all_target_tests]
         )
+        await self.prepare_test_overview_for_run(all_target_tests)
         self.update_tests_pane_chrome()
         group_keys = list(
             dict.fromkeys(
@@ -734,6 +770,10 @@ class LazytestApp(App[None]):
         await self.refresh_test_statuses([name])
 
     async def refresh_test_statuses(self, names: list[str]) -> None:
+        self.refresh_test_status_labels(names)
+        self.update_tests_pane_chrome()
+
+    def refresh_test_status_labels(self, names: list[str]) -> None:
         updated_groups: set[str] = set()
         for name in names:
             test = self.session.tests_by_name.get(name)
@@ -753,7 +793,6 @@ class LazytestApp(App[None]):
                 if self.executable_identity(test) == executable
             ]
             node.set_label(self.format_executable_group(executable, tests))
-        self.update_tests_pane_chrome()
 
     def mark_test_started(self, name: str) -> None:
         self.session.set_status(name, TestStatus.RUNNING)
@@ -763,6 +802,8 @@ class LazytestApp(App[None]):
             queued=self.run_batch.queued - {name},
             running=self.run_batch.running | {name},
         )
+        self.follow_test_in_overview(name)
+        self.refresh_test_status_labels([name])
         self.update_tests_pane_chrome()
 
     def mark_test_finished(self, name: str) -> None:

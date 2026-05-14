@@ -976,6 +976,102 @@ async def test_refresh_test_status_updates_tree_labels_without_rebuilding(
 
 
 @pytest.mark.asyncio
+async def test_running_test_is_followed_and_centered_in_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig(default_build_target="unit_tests"))
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest(f"unit.test_{index}", command=("/tmp/build/unit_tests",))
+            for index in range(40)
+        ]
+    )
+    centered_regions: list[tuple[int, bool]] = []
+    running_selections: list[str | None] = []
+
+    async def fake_build_targets(config, targets, on_output, on_start=None):
+        return ProcessResult(command=("cmake",), returncode=0)
+
+    async def fake_run_test(config, test, on_output, on_start=None):
+        running_selections.append(app.selected_test_name())
+        assert app.test_nodes[test.name].label.plain == f"⟳ {test.name}"
+        return ProcessResult(command=("ctest",), returncode=0)
+
+    monkeypatch.setattr("lazytest.app.build_targets", fake_build_targets)
+    monkeypatch.setattr("lazytest.app.run_test", fake_run_test)
+
+    async with app.run_test(size=(80, 12)) as pilot:
+        app.is_discovering = False
+        await app.apply_filter("", None)
+        tree = app.query_one("#tests", Tree)
+        original_scroll_to_region = tree.scroll_to_region
+
+        def record_scroll_to_region(region, **kwargs):
+            centered_regions.append((region.y, kwargs.get("center", False)))
+            return original_scroll_to_region(region, **kwargs)
+
+        monkeypatch.setattr(tree, "scroll_to_region", record_scroll_to_region)
+
+        await app._run_tests_by_name(["unit.test_30", "unit.test_31"])
+        await pilot.pause()
+
+        assert running_selections == ["unit.test_30", "unit.test_31"]
+        assert app.selected_test_name() == "unit.test_31"
+        assert any(centered for _, centered in centered_regions)
+
+
+@pytest.mark.asyncio
+async def test_run_clears_search_but_preserves_requested_filtered_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_discover(self: LazytestApp) -> None:
+        return None
+
+    monkeypatch.setattr(LazytestApp, "discover", fake_discover)
+    app = LazytestApp(AppConfig(default_build_target="unit_tests"))
+    app.session = Session.from_tests(
+        [
+            DiscoveredTest("unit.math.addition", labels=("unit",)),
+            DiscoveredTest("integration.api.health", labels=("integration",)),
+        ]
+    )
+    run_names: list[str] = []
+
+    async def fake_build_targets(config, targets, on_output, on_start=None):
+        return ProcessResult(command=("cmake",), returncode=0)
+
+    async def fake_run_test(config, test, on_output, on_start=None):
+        run_names.append(test.name)
+        return ProcessResult(command=("ctest",), returncode=0)
+
+    monkeypatch.setattr("lazytest.app.build_targets", fake_build_targets)
+    monkeypatch.setattr("lazytest.app.run_test", fake_run_test)
+
+    async with app.run_test() as pilot:
+        app.is_discovering = False
+        search = app.query_one("#search", Input)
+        search.value = "@unit"
+        await app.apply_filter("@unit", None)
+        await pilot.pause()
+        requested_names = [test.name for test in app.visible_tests]
+
+        await app._run_tests_by_name(requested_names)
+        await pilot.pause()
+
+        assert run_names == ["unit.math.addition"]
+        assert search.value == ""
+        assert [test.name for test in app.visible_tests] == [
+            "unit.math.addition",
+            "integration.api.health",
+        ]
+        assert app.selected_test_name() == "unit.math.addition"
+
+
+@pytest.mark.asyncio
 async def test_tests_pane_title_shows_visible_and_total_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

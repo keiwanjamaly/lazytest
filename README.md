@@ -130,6 +130,8 @@ Search text matches test names, labels, commands, working directories, and metad
 
 When several selected tests map to CMake targets, `lazytest` builds all required targets in one CMake invocation and then runs each test in a separate subprocess with its own output heading. If CTest did not report a direct command for a test, `lazytest` falls back to exact CTest selection.
 
+Starting a run clears the search box, restores the full test overview, and follows the currently executing test in the tree. The requested run set is captured before the search is cleared, so `a` still runs only the tests that were visible under the previous filter.
+
 ## Test
 
 ```bash
